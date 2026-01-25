@@ -31,6 +31,11 @@ build-stdio:
 	go build -ldflags="-r \$$ORIGIN/lib" -o $(BINARY_STDIO) $(MAIN_STDIO)
 	@echo "✅ Stdio build complete: $(BINARY_STDIO)"
 
+
+test: build-stdio
+	@echo "🔍 Starting MCP Inspector..."
+	npx @modelcontextprotocol/inspector -- ./$(BINARY_STDIO) --config indexer/config.yaml
+
 clean:
 	@echo "🧹 Cleaning up build artifacts..."
 	rm -f $(BINARY_LAMBDA) $(BINARY_STDIO) $(DEPLOY_ZIP)
