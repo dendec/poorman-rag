@@ -10,10 +10,6 @@ bootstrap
 !lib/*.a
 !lib/include/
 
-# Object files and archives
-*.o
-*.a
-
 # Go dependencies
 vendor/
 
