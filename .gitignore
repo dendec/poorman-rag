@@ -1,0 +1,44 @@
+# Binaries
+mcp-stdio
+bootstrap
+*.exe
+*.dll
+*.dylib
+
+# Allow libs in lib/
+!lib/*.so
+!lib/*.a
+!lib/include/
+
+# Object files and archives
+*.o
+*.a
+
+# Go dependencies
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+*.egg-info/
+
+# MCP / Project Specific
+deployment.zip
+models/
+index/
+indexer/models/
+indexer/index/
+.indexer/
+config.yaml
+!indexer/config.yaml.example
+
+# Temporary and local
+/tmp/
+.DS_Store
+.vscode/
+.idea/
+*.log

@@ -1,0 +1,39 @@
+service: poorman-rag
+frameworkVersion: '>=3.24.1'
+
+provider:
+  name: aws
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  runtime: provided.al2023
+  logRetentionInDays: 14
+  versionFunctions: false
+  
+  environment:
+    RAG_BUCKET: ${env:RAG_BUCKET}
+    RAG_KB_ALIASES: ${env:RAG_KB_ALIASES}
+    RAG_SEARCH_TYPE: ${env:RAG_SEARCH_TYPE, 'hybrid'}
+    LOG_LEVEL: INFO
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:GetObject
+      Resource: "arn:aws:s3:::${env:RAG_BUCKET}/*"
+
+package:
+  individually: true
+
+functions:
+  mcp-server:
+    name: ${self:service}-${sls:stage}-server
+    memorySize: 2048
+    ephemeralStorageSize: 2048
+    package:
+      artifact: deployment.zip
+    handler: bootstrap
+    timeout: 60
+    url: true
+    environment:
+      MODEL: ${env:MODEL, 'multilingual-e5-small'}
+      DIMENSIONS: ${env:DIMENSIONS, '384'}

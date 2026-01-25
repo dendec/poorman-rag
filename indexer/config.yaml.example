@@ -1,0 +1,45 @@
+# poorman-rag Indexer Sample Configuration
+
+# Storage paths
+db_file: "content.sqlite"
+index_file: "vectors.usearch"
+target_dir: "./docs"
+extensions: [".txt", ".md", ".markdown"]
+
+# S3-compatible Storage (Multicloud)
+s3_bucket: "my-rag-bucket"
+kb_alias: "docs"
+# s3_endpoint: "https://storage.googleapis.com" # For GCP
+# s3_region: "us-east-1"
+# s3_access_key: "ROOTUSER"
+# s3_secret_key: "MINIO123"
+
+# Model settings
+model_name: "intfloat/multilingual-e5-small"
+vector_dim: 384
+max_tokens: 512
+prefix: "passage: "
+query_prefix: "query: "
+
+# Chunking settings (In TOKENS)
+# chunk_size should be <= max_tokens
+chunk_size: 400
+chunk_overlap: 50
+
+# RRF (Hybrid Search) settings
+rrf_k: 60
+limit_vector: 20
+limit_fts: 20
+top_k: 10
+
+# FTS5 settings: "speed" (duplicate data) or "size" (external content)
+fts_mode: "speed"
+
+# Indexing batch parameters
+batch_size: 32
+checkpoint_period: 100
+
+# Normalization (optional)
+# normalization_mapping:
+#   "ё": "е"
+# chars_to_remove: "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"

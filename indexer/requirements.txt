@@ -1,0 +1,12 @@
+torch
+transformers
+numpy
+pyarrow
+huggingface_hub
+optimum
+onnxruntime
+zstandard
+usearch
+tqdm
+python-dotenv
+pyyaml
