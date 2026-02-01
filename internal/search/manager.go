@@ -16,13 +16,13 @@ type Manager struct {
 	opts     utils.S3Options
 	indexDir string // Local directory to search for indices first
 	embedder embedding.Embedder
-	dim      uint
+	dim      int
 
 	// RRF Settings to pass to new engines
 	rrfK        float64
-	limitVector uint
+	limitVector int
 	limitFTS    int
-	topK        uint
+	topK        int
 
 	// List of allowed aliases (from config)
 	aliases map[string]bool
@@ -32,7 +32,7 @@ type Manager struct {
 	mu      sync.RWMutex
 }
 
-func NewManager(opts utils.S3Options, indexDir string, aliases []string, dim uint, embedder embedding.Embedder) *Manager {
+func NewManager(opts utils.S3Options, indexDir string, aliases []string, dim int, embedder embedding.Embedder) *Manager {
 	allowed := make(map[string]bool)
 	for _, a := range aliases {
 		allowed[a] = true
@@ -52,9 +52,9 @@ func (m *Manager) SetRRFConfig(k float64, vector, fts, topK int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.rrfK = k
-	m.limitVector = uint(vector)
+	m.limitVector = vector
 	m.limitFTS = fts
-	m.topK = uint(topK)
+	m.topK = topK
 }
 
 // ListAliases returns a list of available knowledge bases
@@ -89,49 +89,24 @@ func (m *Manager) GetEngine(alias string) (*Engine, error) {
 
 	slog.Info("lazy loading knowledge base", "kb", alias)
 
-	baseS3Path := fmt.Sprintf("rag/index/%s", alias)
-	dbKey := baseS3Path + "/content.sqlite.zst"
-	idxKey := baseS3Path + "/vectors.usearch"
-
-	// Check local index directory if configured
-	var localDB, localIdx string
-	foundLocal := false
+	var uri string
+	tableName := alias // Default table name matches alias
 
 	if m.indexDir != "" {
-		// If indexDir is configured, check for standard filenames (content.sqlite, vectors.usearch) within it.
-		candidateDB := filepath.Join(m.indexDir, "content.sqlite")
-		candidateIdx := filepath.Join(m.indexDir, "vectors.usearch")
-
-		if _, err := os.Stat(candidateDB); err == nil {
-			if _, err := os.Stat(candidateIdx); err == nil {
-				localDB = candidateDB
-				localIdx = candidateIdx
-				foundLocal = true
-				slog.Info("using local index files", "kb", alias, "db", localDB, "idx", localIdx)
-			}
+		// Local directory: e.g., /path/to/indices/jokes_lancedb
+		uri = filepath.Join(m.indexDir, fmt.Sprintf("%s_lancedb", alias))
+		if _, err := os.Stat(uri); err != nil {
+			// Fallback to just alias dir
+			uri = filepath.Join(m.indexDir, alias)
 		}
+	} else {
+		// S3 URI: lancedb can connect to s3://bucket/prefix
+		uri = fmt.Sprintf("s3://%s/rag/index/%s", m.opts.Bucket, alias)
 	}
 
-	if !foundLocal {
-		localDB = filepath.Join("/tmp", fmt.Sprintf("%s_content.sqlite", alias))
-		localIdx = filepath.Join("/tmp", fmt.Sprintf("%s_vectors.usearch", alias))
-
-		files, err := utils.EnsureDownload(m.opts, dbKey, idxKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to download %s: %w", alias, err)
-		}
-		// ... rename logic ...
-		if err := os.Rename(files[0], localDB); err != nil {
-			return nil, fmt.Errorf("rename db tmp -> %s: %w", localDB, err)
-		}
-		if err := os.Rename(files[1], localIdx); err != nil {
-			return nil, fmt.Errorf("rename idx tmp -> %s: %w", localIdx, err)
-		}
-	}
-
-	newEng, err := NewEngine(localDB, localIdx, m.dim, m.embedder,
+	newEng, err := NewEngine(uri, tableName, m.dim, m.embedder,
 		WithQueryPrefix("query: "),
-		WithRRFConfig(m.rrfK, int(m.limitVector), m.limitFTS, int(m.topK)),
+		WithRRFConfig(m.rrfK, m.limitVector, m.limitFTS, m.topK),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init engine %s: %w", alias, err)

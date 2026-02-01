@@ -2,17 +2,13 @@ package search
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"sort"
-	"strings"
 
 	"github.com/dendec/poorman-rag/internal/embedding"
-
-	usearch "github.com/unum-cloud/usearch/golang"
-	_ "modernc.org/sqlite" // Pure Go SQLite driver
+	"github.com/lancedb/lancedb-go/pkg/contracts"
+	"github.com/lancedb/lancedb-go/pkg/lancedb"
 )
 
 const (
@@ -37,64 +33,48 @@ type Result struct {
 }
 
 type Engine struct {
-	db          *sql.DB
-	index       *usearch.Index
+	db          contracts.IConnection
+	table       contracts.ITable
 	embedder    embedding.Embedder
 	queryPrefix string
-	hasFTS      bool
 
 	// RRF Parameters
 	rrfK        float64
-	limitVector uint
+	limitVector int
 	limitFTS    int
-	topK        uint
+	topK        int
 }
 
 type NewOption func(*Engine)
 
-func NewEngine(dbPath, indexPath string, dim uint, embedder embedding.Embedder, opts ...NewOption) (*Engine, error) {
-	// 1. SQLite (Read-Only)
-	dsn := fmt.Sprintf("file:%s?mode=ro", dbPath)
-	db, err := sql.Open("sqlite", dsn)
+func NewEngine(uri, tableName string, dim int, embedder embedding.Embedder, opts ...NewOption) (*Engine, error) {
+	ctx := context.Background()
+
+	// 1. LanceDB Connection
+	db, err := lancedb.Connect(ctx, uri, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open db: %w", err)
-	}
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("db ping failed: %w", err)
+		return nil, fmt.Errorf("failed to connect to lancedb: %w", err)
 	}
 
-	// 2. USEARCH Index
-	conf := usearch.DefaultConfig(dim)
-	index, err := usearch.NewIndex(conf)
+	// 2. Open Table
+	table, err := db.OpenTable(ctx, tableName)
 	if err != nil {
-		slog.Error("failed to create usearch index", "error", err)
-		return nil, fmt.Errorf("usearch init failed: %w", err)
-	}
-	err = index.View(indexPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load index: %w", err)
+		return nil, fmt.Errorf("failed to open table %s: %w", tableName, err)
 	}
 
 	// 3. Engine creation
 	e := &Engine{
 		db:          db,
-		index:       index,
+		table:       table,
 		embedder:    embedder,
 		rrfK:        DefaultRRFK,
-		limitVector: uint(DefaultLimitVector),
+		limitVector: DefaultLimitVector,
 		limitFTS:    DefaultLimitFTS,
-		topK:        uint(DefaultTopK),
+		topK:        DefaultTopK,
 	}
 
 	for _, opt := range opts {
 		opt(e)
-	}
-
-	// 4. Check for FTS table
-	var name string
-	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='dataset_fts'").Scan(&name)
-	if err == nil {
-		e.hasFTS = true
 	}
 
 	return e, nil
@@ -110,20 +90,20 @@ func WithRRFConfig(k float64, vector, fts, topK int) NewOption {
 			e.rrfK = k
 		}
 		if vector > 0 {
-			e.limitVector = uint(vector)
+			e.limitVector = vector
 		}
 		if fts > 0 {
 			e.limitFTS = fts
 		}
 		if topK > 0 {
-			e.topK = uint(topK)
+			e.topK = topK
 		}
 	}
 }
 
 func (e *Engine) Close() {
-	e.db.Close()
-	e.index.Destroy()
+	// LanceDB connections usually don't need explicit close in Go if using shared context,
+	// but Engine should be clean.
 }
 
 func (e *Engine) prepareQuery(q string) string {
@@ -139,34 +119,101 @@ func (e *Engine) HybridSearch(ctx context.Context, query string) ([]Result, erro
 	if err != nil {
 		return nil, fmt.Errorf("embedding failed: %w", err)
 	}
-	vectorIDs, _, err := e.index.Search(queryVec, e.limitVector)
+
+	// LanceDB Hybrid search (not yet fully optimized in Go SDK similarly to Python).
+	// We will perform two searches and fuse them manually to keep RRF control.
+
+	// A. Vector Search
+	vecResults, err := e.table.VectorSearch(ctx, "vector", queryVec, e.limitVector)
 	if err != nil {
-		return nil, fmt.Errorf("vector search error: %w", err)
+		slog.Warn("vector search failed", "error", err)
 	}
 
-	// 2. FTS Search
-	ftsIDs, err := e.searchFTS(query, e.limitFTS)
+	// B. FTS Search
+	ftsResults, err := e.table.FullTextSearch(ctx, "text", query)
 	if err != nil {
-		slog.Warn("FTS search failed", "error", err, "query", query)
-		ftsIDs = []int64{}
+		slog.Warn("fts search failed", "error", err)
 	}
 
 	// 3. RRF Fusion
 	scores := make(map[int64]float64)
 	sources := make(map[int64]Source)
+	textMap := make(map[int64]string)
 
-	for rank, id := range vectorIDs {
-		id64 := int64(id)
-		scores[id64] += 1.0 / (e.rrfK + float64(rank+1))
-		sources[id64] |= Vector
-	}
-
-	for rank, id := range ftsIDs {
-		scores[id] += 1.0 / (e.rrfK + float64(rank+1))
-		sources[id] |= FTS
-	}
+	e.processMapResults(vecResults, Vector, scores, sources, textMap)
+	e.processMapResults(ftsResults, FTS, scores, sources, textMap)
 
 	// 4. Sorting and Top-K
+	return e.mapToResults(scores, sources, textMap), nil
+}
+
+func (e *Engine) processMapResults(results []map[string]interface{}, source Source, scores map[int64]float64, sources map[int64]Source, textMap map[int64]string) {
+	for rank, row := range results {
+		idVal, ok := row["id"]
+		if !ok {
+			continue
+		}
+
+		var id int64
+		switch v := idVal.(type) {
+		case int64:
+			id = v
+		case float64:
+			id = int64(v)
+		case int32:
+			id = int64(v)
+		default:
+			continue
+		}
+
+		textVal, ok := row["text"]
+		if !ok {
+			continue
+		}
+		text, _ := textVal.(string)
+
+		scores[id] += 1.0 / (e.rrfK + float64(rank+1))
+		sources[id] |= source
+		textMap[id] = text
+	}
+}
+
+func (e *Engine) VectorSearch(ctx context.Context, query string) ([]Result, error) {
+	queryVec, err := e.embedder.Embed(ctx, e.prepareQuery(query))
+	if err != nil {
+		return nil, fmt.Errorf("embedding failed: %w", err)
+	}
+	results, err := e.table.VectorSearch(ctx, "vector", queryVec, e.topK)
+	if err != nil {
+		return nil, fmt.Errorf("vector search error: %w", err)
+	}
+
+	scores := make(map[int64]float64)
+	sources := make(map[int64]Source)
+	textMap := make(map[int64]string)
+	e.processMapResults(results, Vector, scores, sources, textMap)
+
+	return e.mapToResults(scores, sources, textMap), nil
+}
+
+func (e *Engine) FTSSearch(ctx context.Context, query string) ([]Result, error) {
+	results, err := e.table.FullTextSearch(ctx, "text", query)
+	if err != nil {
+		return nil, fmt.Errorf("fts search error: %w", err)
+	}
+	// Note: FullTextSearch might not support Limit in the same way,
+	// but the doc says FullTextSearch(ctx, column, query).
+	// If it needs limit we might need another method.
+
+	scores := make(map[int64]float64)
+	sources := make(map[int64]Source)
+	textMap := make(map[int64]string)
+	e.processMapResults(results, FTS, scores, sources, textMap)
+
+	return e.mapToResults(scores, sources, textMap), nil
+}
+
+func (e *Engine) mapToResults(scores map[int64]float64, sources map[int64]Source, textMap map[int64]string) []Result {
 	type item struct {
 		id    int64
 		score float64
@@ -175,44 +222,9 @@ func (e *Engine) HybridSearch(ctx context.Context, query string) ([]Result, erro
 	for id, score := range scores {
 		sorted = append(sorted, item{id, score})
 	}
-
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].score > sorted[j].score
 	})
-
-	maxTopK := int(e.topK)
-	if len(sorted) > maxTopK {
-		sorted = sorted[:maxTopK]
-	}
-
-	if len(sorted) == 0 {
-		return []Result{}, nil
-	}
-
-	// 5. Data Hydration
-	ids := make([]interface{}, len(sorted))
-	for i, it := range sorted {
-		ids[i] = it.id
-	}
-
-	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
-	querySQL := fmt.Sprintf("SELECT id, text FROM dataset WHERE id IN (%s)", placeholders)
-
-	rows, err := e.db.Query(querySQL, ids...)
-	if err != nil {
-		return nil, fmt.Errorf("db fetch error: %w", err)
-	}
-	defer rows.Close()
-
-	textMap := make(map[int64]string)
-	for rows.Next() {
-		var id int64
-		var text string
-		if err := rows.Scan(&id, &text); err != nil {
-			continue
-		}
-		textMap[id] = text
-	}
 
 	results := make([]Result, 0, len(sorted))
 	for _, it := range sorted {
@@ -225,136 +237,5 @@ func (e *Engine) HybridSearch(ctx context.Context, query string) ([]Result, erro
 			})
 		}
 	}
-
-	return results, nil
-}
-
-var ftsSanitizer = regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
-
-func (e *Engine) searchFTS(query string, limit int) ([]int64, error) {
-	if !e.hasFTS {
-		return []int64{}, nil
-	}
-	safeQuery := ftsSanitizer.ReplaceAllString(query, " ")
-	tokens := strings.Fields(safeQuery)
-	if len(tokens) == 0 {
-		return []int64{}, nil
-	}
-
-	ftsQuery := strings.Join(tokens, " OR ")
-	sql := `SELECT rowid FROM dataset_fts WHERE dataset_fts MATCH ? ORDER BY rank LIMIT ?`
-
-	rows, err := e.db.Query(sql, ftsQuery, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
-		ids = append(ids, id)
-	}
-	return ids, nil
-}
-
-func (e *Engine) VectorSearch(ctx context.Context, query string) ([]Result, error) {
-	queryVec, err := e.embedder.Embed(ctx, e.prepareQuery(query))
-	if err != nil {
-		return nil, fmt.Errorf("embedding failed: %w", err)
-	}
-	vectorIDs, _, err := e.index.Search(queryVec, e.topK)
-	if err != nil {
-		return nil, fmt.Errorf("vector search error: %w", err)
-	}
-
-	if len(vectorIDs) == 0 {
-		return []Result{}, nil
-	}
-
-	ids := make([]interface{}, len(vectorIDs))
-	for i, id := range vectorIDs {
-		ids[i] = int64(id)
-	}
-
-	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
-	sql := fmt.Sprintf("SELECT id, text FROM dataset WHERE id IN (%s)", placeholders)
-
-	rows, err := e.db.Query(sql, ids...)
-	if err != nil {
-		return nil, fmt.Errorf("db fetch error: %w", err)
-	}
-	defer rows.Close()
-
-	textMap := make(map[int64]string)
-	for rows.Next() {
-		var id int64
-		var text string
-		if err := rows.Scan(&id, &text); err != nil {
-			continue
-		}
-		textMap[id] = text
-	}
-
-	results := make([]Result, 0, len(vectorIDs))
-	for i, id := range vectorIDs {
-		if txt, ok := textMap[int64(id)]; ok {
-			results = append(results, Result{
-				ID:     int64(id),
-				Text:   txt,
-				Score:  1.0 / (float64(i) + 1.0),
-				Source: Vector,
-			})
-		}
-	}
-	return results, nil
-}
-
-func (e *Engine) FTSSearch(ctx context.Context, query string) ([]Result, error) {
-	ids, err := e.searchFTS(query, int(e.topK))
-	if err != nil {
-		return nil, fmt.Errorf("fts search error: %w", err)
-	}
-
-	if len(ids) == 0 {
-		return []Result{}, nil
-	}
-
-	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
-	sql := fmt.Sprintf("SELECT id, text FROM dataset WHERE id IN (%s)", placeholders)
-	idsAny := make([]interface{}, len(ids))
-	for i, id := range ids {
-		idsAny[i] = id
-	}
-	rows, err := e.db.Query(sql, idsAny...)
-	if err != nil {
-		return nil, fmt.Errorf("db fetch error: %w", err)
-	}
-	defer rows.Close()
-
-	textMap := make(map[int64]string)
-	for rows.Next() {
-		var id int64
-		var text string
-		if err := rows.Scan(&id, &text); err != nil {
-			continue
-		}
-		textMap[id] = text
-	}
-
-	results := make([]Result, 0, len(ids))
-	for i, id := range ids {
-		if txt, ok := textMap[id]; ok {
-			results = append(results, Result{
-				ID:     id,
-				Text:   txt,
-				Score:  1.0 / (float64(i) + 1.0),
-				Source: FTS,
-			})
-		}
-	}
-	return results, nil
+	return results
 }

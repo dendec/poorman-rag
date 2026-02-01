@@ -6,43 +6,39 @@ This guide explains how to prepare your knowledge base for poorman-rag.
 The indexer uses a YAML configuration file. You can find a template in `indexer/config.yaml.example`.
 
 ### Key Parameters:
-- `model_name`: HuggingFace model ID for generating embeddings (e.g., `intfloat/multilingual-e5-small`).
-- `vector_dim`: Must match your model (384 for e5-small, 768 for Gemma).
-- `max_tokens`: Maximum context size of the model. 
-- `chunk_size`: Size of text chunks in units of **tokens**.
-- `chunk_overlap`: Number of overlapping tokens between chunks.
-- `fts_mode`: `size` (compact) or `speed` (fast lookup, larger index).
-- `target_dir`: Path to the directory containing your documents.
-- `extensions`: List of file extensions to index (e.g., `[".txt", ".md"]`).
+- `lancedb_uri`: Path to local LanceDB index (e.g., `index/lancedb`).
+- `table_name`: Name of the table within LanceDB (default: `dataset`).
+- `s3_bucket`: Destination bucket for search indices and models.
+- `kb_alias`: Alias for this knowledge base (used in S3 paths).
 
 ## 2. Building the Index
-Run the unified indexer CLI with the `index` action:
+Run the unified indexer CLI with the `index` action. This will automatically run `optimize` at the end:
 ```bash
 python indexer/main.py --config indexer/config.yaml index
 ```
-*Note: You can override the directory from the config using `--dir`:*
+
+## 3. Optimizing the Index
+You can manually trigger compaction to merge fragments and delete old versions:
 ```bash
-python indexer/main.py --config indexer/config.yaml index --dir ./my_docs
+python indexer/main.py --config indexer/config.yaml optimize
 ```
 
-## 3. Testing the Index
+## 4. Testing the Index
 You can test your index locally using the `search` action. This starts an interactive CLI loop:
 ```bash
 python indexer/main.py --config indexer/config.yaml search
 ```
-▶ `query >` *your search term*
 
-## 4. Exporting the Model to ONNX
+## 5. Exporting the Model to ONNX
 poorman-rag uses ONNX for local inference in Lambda.
 ```bash
-python indexer/scripts/export_onnx.py --model_id intfloat/multilingual-e5-small
+python indexer/main.py --config indexer/config.yaml export-onnx
 ```
 
-## 5. Upload to S3
-Upload the generated files to your S3 bucket:
+## 6. Syncing to S3
+The indexer now includes a built-in sync command that uses your configuration to upload the index to the correct S3 location:
 ```bash
-aws s3 cp content.sqlite.zst s3://$RAG_BUCKET/rag/index/$ALIAS/
-aws s3 cp vectors.usearch s3://$RAG_BUCKET/rag/index/$ALIAS/
-aws s3 cp model_quantized.onnx s3://$RAG_BUCKET/rag/models/$MODEL/
-aws s3 cp tokenizer.json s3://$RAG_BUCKET/rag/models/$MODEL/
+python indexer/main.py --config indexer/config.yaml sync
 ```
+
+This replaces manual `aws s3 cp` commands and ensures the directory structure matches Go runtime expectations.

@@ -6,15 +6,15 @@
 
 *   **Zero Infrastructure**: No managed vector databases (Pinecone, Weaviate) required. Your data lives in S3 and compute happens in Lambda.
 *   **Insanely Cost-Effective**: Pay only for what you use. Ideal for small to medium-sized knowledge bases where a $50/mo vector DB is overkill.
-*   **Hybrid Search**: Combines **Vector Search** (semantic) with **SQLite FTS5** (keyword) using **Reciprocal Rank Fusion (RRF)** for superior result quality.
-*   **Blazing Fast**: The search engine is written in **Go** using `usearch` and `onnxruntime` for local embedding inference and vector matching.
+*   **Hybrid Search**: Combines **Vector Search** (semantic) with **Tantivy FTS** (keyword) natively using **LanceDB** for superior result quality.
+*   **Blazing Fast**: The search engine is written in **Go** using `lancedb-go` and `onnxruntime` for extremely fast, low-memory RAG.
 *   **Protocol Native**: Built from the ground up to support MCP, allowing any AI tool to query your knowledge base as a set of tools.
 
 ## 🏗️ Architecture
 
-1.  **Indexer (Python)**: Processes your raw data, generates embeddings, and builds a compact SQLite + Usearch index.
-2.  **S3 Storage**: Stores the compressed index files and model weights.
-3.  **MCP Server (Go)**: A Lambda function that lazy-loads indexes from S3, performs hybrid search, and communicates via MCP.
+1.  **Indexer (Python)**: Processes your raw data, generates embeddings, and builds a unified **LanceDB** index.
+2.  **S3 Storage**: Stores the versioned LanceDB index files and model weights.
+3.  **MCP Server (Go)**: A Lambda function that connects directly to LanceDB in S3, performs hybrid search, and communicates via MCP.
 
 ## 🛠️ Quick Start
 
@@ -25,23 +25,27 @@
 *   Python 3.10+ (for indexing)
 
 ### 2. Index Your Data
-Prepare your data using the provided Python scripts in the `indexer/` directory.
+Prepare your data using the Python indexer.
 ```bash
 # Install dependencies
 pip install -r indexer/requirements.txt
 
-# Run the indexer (see docs/indexer.md for details)
-python indexer/your_indexer.py index
+# Run the indexer
+cd indexer
+python main.py --config config.yaml index
+
+# (Optional) Compact and Sync to S3
+python main.py --config config.yaml optimize
+python main.py --config config.yaml sync
 ```
 
 ### 3. Deploy to AWS
 ```bash
-# Build the Go binary
-GOOS=linux GOARCH=amd64 go build -o bootstrap cmd/mcp/main.go
-zip deployment.zip bootstrap lib/libonnxruntime.so
+# Build the Go binary (using Makefile)
+make build
 
 # Deploy using Serverless
-export RAG_BUCKET=your-bucket-name
+export RAG_S3_BUCKET=your-bucket-name
 export RAG_KB_ALIASES=docs
 sls deploy
 ```

@@ -34,7 +34,7 @@ func NewApp(configPath string) (*App, error) {
 
 	var (
 		embedder embedding.Embedder
-		dim      uint
+		dim      int
 	)
 
 	if !isLocal {
@@ -68,11 +68,11 @@ func NewApp(configPath string) (*App, error) {
 	}, nil
 }
 
-func initRemoteEmbedder() (embedding.Embedder, uint, error) {
+func initRemoteEmbedder() (embedding.Embedder, int, error) {
 	apiKey := utils.StringFromEnv("OPENAI_API_KEY")
 	baseURL := utils.StringFromEnv("OPENAI_BASE_URL")
 	apiModel := utils.StringFromEnv("MODEL")
-	dim := uint(utils.IntFromEnv("DIMENSIONS"))
+	dim := int(utils.IntFromEnv("DIMENSIONS"))
 
 	slog.Info("initializing remote OpenAI-compatible embedder", "model", apiModel, "url", baseURL)
 	return embedding.NewOpenAIEmbedder(apiKey, baseURL, apiModel), dim, nil
@@ -94,7 +94,7 @@ func getModelKeys(model string) []string {
 	}
 }
 
-func initLocalEmbedder(cfg *config.Config) (embedding.Embedder, uint, error) {
+func initLocalEmbedder(cfg *config.Config) (embedding.Embedder, int, error) {
 	libPath := filepath.Join("lib", "libonnxruntime.so")
 
 	// e.g. "multilingual-e5-small"
@@ -192,7 +192,7 @@ func initLocalEmbedder(cfg *config.Config) (embedding.Embedder, uint, error) {
 	)
 
 	emb, err := onnx.NewGenericEmbedder(libPath, onnxCfg)
-	return emb, onnxCfg.Dimensions, err
+	return emb, int(onnxCfg.Dimensions), err
 }
 
 func InitSlog() {

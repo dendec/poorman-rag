@@ -6,9 +6,13 @@ bootstrap
 *.dylib
 
 # Allow libs in lib/
-!lib/*.so
-!lib/*.a
+!lib/linux_amd64/*.so
+!lib/linux_amd64/*.so.gz
+!lib/linux_amd64/*.a
 !lib/include/
+
+# Ignore the large decompressed library (we use the .gz version in git)
+lib/linux_amd64/liblancedb_go.so
 
 # Go dependencies
 vendor/
@@ -21,6 +25,9 @@ __pycache__/
 env/
 venv/
 *.egg-info/
+indexer/build/
+indexer/_data_cache/
+indexer/core/datasources/
 
 # MCP / Project Specific
 deployment.zip
@@ -30,7 +37,9 @@ indexer/models/
 indexer/index/
 .indexer/
 config.yaml
+config*.yaml
 !indexer/config.yaml.example
+!config.yaml.example
 
 # Temporary and local
 /tmp/
