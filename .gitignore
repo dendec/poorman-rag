@@ -41,6 +41,9 @@ config*.yaml
 !indexer/config.yaml.example
 !config.yaml.example
 
+# Artifacts
+dist/
+
 # Temporary and local
 /tmp/
 .DS_Store
