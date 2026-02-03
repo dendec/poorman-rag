@@ -2,16 +2,15 @@
 
 DIST_DIR=dist
 BINARY_LAMBDA=$(DIST_DIR)/bootstrap
-BINARY_STDIO=$(DIST_DIR)/mcp-stdio
-BINARY_EMBEDDING=$(DIST_DIR)/embedding-bootstrap
+BINARY_MCP=$(DIST_DIR)/mcp
+BINARY_EMBEDDING=$(DIST_DIR)/embedding
 MCP_DEPLOY_ZIP=$(DIST_DIR)/mcp.zip
 EMBEDDING_DEPLOY_ZIP=$(DIST_DIR)/embedding.zip
-MAIN_LAMBDA=cmd/mcp/main.go
-MAIN_STDIO=cmd/stdio/main.go
+MAIN_MCP=cmd/mcp/main.go
 MAIN_EMBEDDING=cmd/embedding/main.go
 LIB_PATH=lib/linux_amd64/libonnxruntime.so
 
-.PHONY: all build build-lambda build-stdio build-embedding clean prepare-libs dist-dir
+.PHONY: all build build-mcp build-embedding clean prepare-libs dist-dir test
 
 all: build
 
@@ -24,45 +23,47 @@ prepare-libs:
 		gunzip -c lib/linux_amd64/liblancedb_go.so.gz > lib/linux_amd64/liblancedb_go.so; \
 	fi
 
-build: dist-dir prepare-libs build-lambda build-stdio build-embedding
+build: dist-dir prepare-libs build-mcp build-embedding
 
-build-lambda: dist-dir prepare-libs
-	@echo "🚀 Building Go binary for AWS Lambda (Linux AMD64)..."
+build-mcp: dist-dir prepare-libs
+	@echo "🚀 Building Go binary for MCP server..."
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
 	CGO_CFLAGS="-I$(PWD)/lib/include -I$(PWD)/include" \
 	CGO_LDFLAGS="-Wl,--allow-multiple-definition -L$(PWD)/lib/linux_amd64 -ltokenizers -llancedb_go -lm -ldl -lpthread -lstdc++" \
-	go build -ldflags="-r \$$ORIGIN/lib/linux_amd64" -o $(BINARY_LAMBDA) $(MAIN_LAMBDA)
+	go build -ldflags="-r \$$ORIGIN/lib/linux_amd64" -o $(BINARY_MCP) $(MAIN_MCP)
 	@echo "📦 Packaging into $(MCP_DEPLOY_ZIP)..."
-	# Include both ONNX and LanceDB shared libs if they exist
-	zip -j $(MCP_DEPLOY_ZIP) $(BINARY_LAMBDA) lib/linux_amd64/libonnxruntime.so lib/linux_amd64/liblancedb_go.so
-	@echo "✅ Lambda build complete: $(MCP_DEPLOY_ZIP)"
-
-build-stdio: dist-dir prepare-libs
-	@echo "💻 Building local Stdio binary..."
-	CGO_ENABLED=1 \
-	CGO_CFLAGS="-I$(PWD)/lib/include -I$(PWD)/include" \
-	CGO_LDFLAGS="-Wl,--allow-multiple-definition -L$(PWD)/lib/linux_amd64 -ltokenizers -llancedb_go -lm -ldl -lpthread -lstdc++" \
-	go build -ldflags="-r \$$ORIGIN/lib/linux_amd64" -o $(BINARY_STDIO) $(MAIN_STDIO)
-	@echo "✅ Stdio build complete: $(BINARY_STDIO)"
+	cp $(BINARY_MCP) $(BINARY_LAMBDA)
+	zip -j $(MCP_DEPLOY_ZIP) $(BINARY_LAMBDA) lib/linux_amd64/liblancedb_go.so
+	rm $(BINARY_LAMBDA)
+	@echo "✅ MCP Lambda build complete: $(MCP_DEPLOY_ZIP)"
 
 build-embedding: dist-dir prepare-libs
-	@echo "🌐 Building embedding service binary for AWS Lambda (Linux AMD64)..."
+	@echo "🌐 Building embedding service binary..."
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
 	CGO_CFLAGS="-I$(PWD)/lib/include -I$(PWD)/include" \
 	CGO_LDFLAGS="-Wl,--allow-multiple-definition -L$(PWD)/lib/linux_amd64 -lonnxruntime -ltokenizers -lm -ldl -lpthread -lstdc++" \
 	go build -ldflags="-r \$$ORIGIN/lib/linux_amd64" -o $(BINARY_EMBEDDING) $(MAIN_EMBEDDING)
 	@echo "📦 Packaging into $(EMBEDDING_DEPLOY_ZIP)..."
-	# Lambda runtime expects the executable to be named 'bootstrap'
-	cp $(BINARY_EMBEDDING) bootstrap
-	zip -j $(EMBEDDING_DEPLOY_ZIP) bootstrap lib/linux_amd64/libonnxruntime.so
-	rm bootstrap
+	cp $(BINARY_EMBEDDING) $(BINARY_LAMBDA)
+	zip -j $(EMBEDDING_DEPLOY_ZIP) $(BINARY_LAMBDA) lib/linux_amd64/libonnxruntime.so
+	rm $(BINARY_LAMBDA)
 	@echo "✅ Embedding Lambda build complete: $(EMBEDDING_DEPLOY_ZIP)"
 
-test: build-stdio
-	@echo "🔍 Starting MCP Inspector..."
-	npx @modelcontextprotocol/inspector -- ./$(BINARY_STDIO) --config indexer/config.yaml
+test:
+	@echo "🧪 Running unit tests (excluding CGO-dependent packages)..."
+	go test ./internal/domain/... ./internal/services/... ./internal/utils/... ./internal/config/... -v
+	@echo "✅ Unit tests completed"
+
+test-integration: build-mcp
+	@echo "🔍 Starting MCP Inspector for integration tests..."
+	MODE=stdio npx @modelcontextprotocol/inspector -- ./$(BINARY_STDIO) --config indexer/config.yaml
 
 clean:
 	@echo "🧹 Cleaning up build artifacts..."
 	rm -f $(BINARY_LAMBDA) $(BINARY_STDIO) $(BINARY_EMBEDDING) $(MCP_DEPLOY_ZIP) $(EMBEDDING_DEPLOY_ZIP)
 	@echo "✅ Cleanup complete"
+
+clear:
+	@echo "🗑️ Removing dist directory..."
+	rm -rf $(DIST_DIR)
+	@echo "✅ Dist directory cleared"

@@ -16,10 +16,11 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/dendec/poorman-rag/internal/config"
-	"github.com/dendec/poorman-rag/internal/embedding_service"
+	"github.com/dendec/poorman-rag/internal/infrastructure/embedding/loader"
+	embedding_api "github.com/dendec/poorman-rag/internal/api/embedding"
 )
 
-var embeddingService *embedding_service.Service
+var embeddingAPIAdapter *embedding_api.APIAdapter
 
 func init() {
 	InitSlog()
@@ -32,12 +33,14 @@ func initializeService() error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	service, err := embedding_service.NewService(cfg)
+	// Load the embedding service using the loader
+	service, err := loader.LoadEmbeddingService(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize embedding service: %w", err)
 	}
 
-	embeddingService = service
+	// Create the API adapter
+	embeddingAPIAdapter = embedding_api.NewAPIAdapter(service)
 
 	return nil
 }
@@ -48,13 +51,13 @@ func handleRequest(ctx context.Context, request events.APIGatewayV2HTTPRequest) 
 		return events.APIGatewayV2HTTPResponse{StatusCode: 405, Body: "Method Not Allowed"}, nil
 	}
 
-	var embeddingReq embedding_service.EmbeddingRequest
+	var embeddingReq embedding_api.EmbeddingRequest
 	if err := json.Unmarshal([]byte(request.Body), &embeddingReq); err != nil {
 		slog.Error("invalid request body", "error", err)
 		return events.APIGatewayV2HTTPResponse{StatusCode: 400, Body: "Invalid JSON"}, nil
 	}
 
-	response, err := embeddingService.HandleOpenAIRequest(ctx, embeddingReq)
+	response, err := embeddingAPIAdapter.HandleOpenAIRequest(ctx, embeddingReq)
 	if err != nil {
 		slog.Error("embedding request processing error", "error", err)
 		return events.APIGatewayV2HTTPResponse{StatusCode: 500, Body: "Internal Error"}, nil
@@ -85,7 +88,7 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var embeddingReq embedding_service.EmbeddingRequest
+	var embeddingReq embedding_api.EmbeddingRequest
 	if err := json.Unmarshal(body, &embeddingReq); err != nil {
 		slog.Error("invalid request body", "error", err)
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -93,7 +96,7 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	response, err := embeddingService.HandleOpenAIRequest(ctx, embeddingReq)
+	response, err := embeddingAPIAdapter.HandleOpenAIRequest(ctx, embeddingReq)
 	if err != nil {
 		slog.Error("embedding request processing error", "error", err)
 		http.Error(w, "Internal Error", http.StatusInternalServerError)
@@ -108,13 +111,13 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 func cliHandler(text string) error {
 	ctx := context.Background()
 
-	embedding, err := embeddingService.ComputeEmbedding(ctx, text)
+	embedding, err := embeddingAPIAdapter.ComputeEmbedding(ctx, text)
 	if err != nil {
 		return fmt.Errorf("failed to compute embedding: %w", err)
 	}
 
 	// Output as JSON
-	result := embedding_service.EmbeddingObj{
+	result := embedding_api.EmbeddingObj{
 		Object:    "embedding",
 		Index:     0,
 		Embedding: embedding,

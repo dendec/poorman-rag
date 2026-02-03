@@ -11,6 +11,7 @@ require (
 	github.com/klauspost/compress v1.18.3
 	github.com/lancedb/lancedb-go v0.1.2
 	github.com/openai/openai-go v1.12.0
+	github.com/stretchr/testify v1.9.0
 	github.com/yalue/onnxruntime_go v1.25.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -33,10 +34,13 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6 // indirect
 	github.com/aws/smithy-go v1.24.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
 	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect

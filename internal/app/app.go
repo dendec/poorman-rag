@@ -8,16 +8,17 @@ import (
 	"strings"
 
 	"github.com/dendec/poorman-rag/internal/config"
+	"github.com/dendec/poorman-rag/internal/domain/mcp"
 	"github.com/dendec/poorman-rag/internal/embedding"
 	"github.com/dendec/poorman-rag/internal/embedding/onnx"
-	"github.com/dendec/poorman-rag/internal/mcp"
-	"github.com/dendec/poorman-rag/internal/search"
+	mcp_service "github.com/dendec/poorman-rag/internal/services/mcp"
+	search_service_pkg "github.com/dendec/poorman-rag/internal/services/search"
 	"github.com/dendec/poorman-rag/internal/utils"
 )
 
 type App struct {
-	Handler *mcp.Handler
-	Manager *search.Manager
+	Handler       *mcp_service.Service
+	SearchService *search_service_pkg.Service
 }
 
 func NewApp(configPath string) (*App, error) {
@@ -47,7 +48,7 @@ func NewApp(configPath string) (*App, error) {
 		return nil, fmt.Errorf("embedder init failed: %w", err)
 	}
 
-	slog.Info("initializing search manager", "aliases", cfg.Aliases)
+	slog.Info("initializing search service", "aliases", cfg.Aliases)
 	s3Opts := utils.S3Options{
 		Bucket:    cfg.Bucket,
 		Endpoint:  cfg.S3Endpoint,
@@ -55,16 +56,15 @@ func NewApp(configPath string) (*App, error) {
 		AccessKey: cfg.S3AccessKey,
 		SecretKey: cfg.S3SecretKey,
 	}
-	manager := search.NewManager(s3Opts, cfg.IndexDir, cfg.Aliases, dim, embedder)
+	searchService := search_service_pkg.NewService(s3Opts, cfg.IndexDir, cfg.Aliases, dim, embedder, utils.StringFromEnvDefault("RAG_SEARCH_TYPE", mcp.SearchHybrid))
 
-	manager.SetRRFConfig(cfg.RRFK, cfg.LimitVector, cfg.LimitFTS, cfg.TopK)
+	searchService.SetRRFConfig(cfg.RRFK, cfg.LimitVector, cfg.LimitFTS, cfg.TopK)
 
-	searchType := utils.StringFromEnvDefault("RAG_SEARCH_TYPE", mcp.SearchHybrid)
-	handler := mcp.NewHandler(manager, searchType)
+	handler := mcp_service.NewService(searchService, utils.StringFromEnvDefault("RAG_SEARCH_TYPE", mcp.SearchHybrid))
 
 	return &App{
-		Handler: handler,
-		Manager: manager,
+		Handler:       handler,
+		SearchService: searchService,
 	}, nil
 }
 
