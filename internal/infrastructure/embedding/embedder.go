@@ -1,15 +1,15 @@
-package onnx
+package embedding
 
 import (
 	"context"
 	"fmt"
 	"path/filepath"
 
-	"github.com/dendec/poorman-rag/internal/domain/embedding"
+	"github.com/dendec/poorman-rag/internal/domain"
 	"github.com/dendec/poorman-rag/internal/embedding/onnx"
 )
 
-// ONNXEmbedder implements the embedding.Embedder interface using ONNX runtime
+// ONNXEmbedder implements the domain.Embedder interface using ONNX runtime
 type ONNXEmbedder struct {
 	embedder *onnx.GenericEmbedder
 	config   onnx.Config
@@ -28,7 +28,7 @@ func NewONNXEmbedder(libPath string, config onnx.Config) (*ONNXEmbedder, error) 
 	}, nil
 }
 
-// Embed implements the embedding.Embedder interface
+// Embed implements the domain.Embedder interface
 func (oe *ONNXEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	select {
 	case <-ctx.Done():
@@ -44,13 +44,13 @@ func (oe *ONNXEmbedder) Embed(ctx context.Context, text string) ([]float32, erro
 }
 
 // GetModelInfo returns information about the underlying model
-func (oe *ONNXEmbedder) GetModelInfo() embedding.Model {
-	return embedding.Model{
-		Name:     filepath.Base(oe.config.ModelPath), // Using filename as model name
-		Type:     "onnx",
-		Dim:      int(oe.config.Dimensions),
-		Pooling:  string(oe.config.Pooling),
-		Path:     filepath.Dir(oe.config.ModelPath), // directory containing the model files
+func (oe *ONNXEmbedder) GetModelInfo() domain.Model {
+	return domain.Model{
+		Name:    filepath.Base(oe.config.ModelPath), // Using filename as model name
+		Type:    "onnx",
+		Dim:     int(oe.config.Dimensions),
+		Pooling: string(oe.config.Pooling),
+		Path:    filepath.Dir(oe.config.ModelPath), // directory containing the model files
 	}
 }
 

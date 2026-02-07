@@ -7,41 +7,30 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/dendec/poorman-rag/internal/domain/mcp"
+	"github.com/dendec/poorman-rag/internal/domain"
 	search_service "github.com/dendec/poorman-rag/internal/services/search"
-)
-
-const (
-	SearchVector = "vector"
-	SearchFTS    = "fts"
-	SearchHybrid = "hybrid"
 )
 
 // Service provides MCP functionality
 type Service struct {
 	searchService search_service.SearchService
-	searchType    string
 }
 
 // NewService creates a new MCP service
-func NewService(searchService search_service.SearchService, searchType string) *Service {
-	if searchType == "" {
-		searchType = SearchHybrid // default
-	}
+func NewService(searchService search_service.SearchService) *Service {
 	return &Service{
 		searchService: searchService,
-		searchType:    searchType,
 	}
 }
 
 // Process handles an MCP request
-func (s *Service) Process(ctx context.Context, reqBody []byte) (*mcp.Response, error) {
-	var req mcp.Request
+func (s *Service) Process(ctx context.Context, reqBody []byte) (*domain.Response, error) {
+	var req domain.Request
 	if err := json.Unmarshal(reqBody, &req); err != nil {
 		return nil, err
 	}
 
-	resp := &mcp.Response{
+	resp := &domain.Response{
 		JSONRPC: "2.0",
 		ID:      req.ID,
 	}
@@ -60,13 +49,13 @@ func (s *Service) Process(ctx context.Context, reqBody []byte) (*mcp.Response, e
 	case "tools/call":
 		result, err := s.callTool(ctx, req.Params)
 		if err != nil {
-			resp.Error = &mcp.Error{Code: -32603, Message: err.Error()}
+			resp.Error = &domain.Error{Code: -32603, Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
 	default:
 		// MCP requires ignoring unknown methods or returning an error
-		resp.Error = &mcp.Error{Code: -32601, Message: fmt.Sprintf("Method not found: %s", req.Method)}
+		resp.Error = &domain.Error{Code: -32601, Message: fmt.Sprintf("Method not found: %s", req.Method)}
 	}
 
 	return resp, nil
@@ -89,13 +78,13 @@ func (s *Service) initialize() map[string]interface{} {
 // listTools returns the list of available tools
 func (s *Service) listTools() map[string]interface{} {
 	kbs := s.searchService.GetKnowledgeBases()
-	tools := make([]mcp.Tool, 0, len(kbs))
+	tools := make([]domain.Tool, 0, len(kbs))
 
 	for _, kb := range kbs {
 		toolName := fmt.Sprintf("search_%s", kb.Name)
 		description := fmt.Sprintf("Search in the '%s' knowledge base.", kb.Description)
 
-		tools = append(tools, mcp.Tool{
+		tools = append(tools, domain.Tool{
 			Name:        toolName,
 			Description: description,
 			InputSchema: map[string]interface{}{
@@ -116,9 +105,9 @@ func (s *Service) listTools() map[string]interface{} {
 	}
 }
 
-// callTool handles a tool call
-func (s *Service) callTool(ctx context.Context, paramsRaw json.RawMessage) (*mcp.ToolCallResult, error) {
-	var params mcp.ToolCallParams
+// callTool handles a tool call (internal method)
+func (s *Service) callTool(ctx context.Context, paramsRaw json.RawMessage) (*domain.ToolCallResult, error) {
+	var params domain.ToolCallParams
 	if err := json.Unmarshal(paramsRaw, &params); err != nil {
 		return nil, fmt.Errorf("invalid params: %v", err)
 	}
@@ -136,18 +125,18 @@ func (s *Service) callTool(ctx context.Context, paramsRaw json.RawMessage) (*mcp
 		return nil, fmt.Errorf("query is required")
 	}
 
-	slog.Info("incoming MCP search", "kb", kbName, "query", query, "type", s.searchType)
+	slog.Info("incoming MCP search", "kb", kbName, "query", query)
 
 	// Perform search
-	searchQuery := mcp.SearchQuery{
+	searchQuery := domain.SearchQuery{
 		Query: query,
 		KB:    kbName,
 	}
 
 	results, err := s.searchService.Search(ctx, searchQuery)
 	if err != nil {
-		return &mcp.ToolCallResult{
-			Content: []mcp.ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
+		return &domain.ToolCallResult{
+			Content: []domain.ToolContent{{Type: "text", Text: fmt.Sprintf("Error: %v", err)}},
 			IsError: true,
 		}, nil
 	}
@@ -155,10 +144,10 @@ func (s *Service) callTool(ctx context.Context, paramsRaw json.RawMessage) (*mcp
 	// Log statistics
 	slog.Info("search finished", "kb", kbName, "total", len(results))
 
-	content := make([]mcp.ToolContent, 0, len(results))
+	content := make([]domain.ToolContent, 0, len(results))
 	for _, res := range results {
-		content = append(content, mcp.ToolContent{Type: "text", Text: res.Text})
+		content = append(content, domain.ToolContent{Type: "text", Text: res.Text})
 	}
 
-	return &mcp.ToolCallResult{Content: content}, nil
+	return &domain.ToolCallResult{Content: content}, nil
 }

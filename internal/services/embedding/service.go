@@ -5,17 +5,17 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dendec/poorman-rag/internal/domain/embedding"
+	"github.com/dendec/poorman-rag/internal/domain"
 )
 
 // Service provides embedding functionality
 type Service struct {
-	embedder embedding.Embedder
+	embedder domain.Embedder
 	model    string
 }
 
 // NewService creates a new embedding service
-func NewService(embedder embedding.Embedder, model string) *Service {
+func NewService(embedder domain.Embedder, model string) *Service {
 	return &Service{
 		embedder: embedder,
 		model:    model,
@@ -23,7 +23,7 @@ func NewService(embedder embedding.Embedder, model string) *Service {
 }
 
 // ComputeEmbedding computes embedding for a single text
-func (s *Service) ComputeEmbedding(ctx context.Context, text string) (embedding.Embedding, error) {
+func (s *Service) ComputeEmbedding(ctx context.Context, text string) (domain.Embedding, error) {
 	if text == "" {
 		return nil, errors.New("text cannot be empty")
 	}
@@ -33,16 +33,16 @@ func (s *Service) ComputeEmbedding(ctx context.Context, text string) (embedding.
 		return nil, fmt.Errorf("failed to compute embedding: %w", err)
 	}
 
-	return embedding.Embedding(vec), nil
+	return domain.Embedding(vec), nil
 }
 
 // ComputeEmbeddings computes embeddings for multiple texts
-func (s *Service) ComputeEmbeddings(ctx context.Context, texts []string) ([]embedding.Embedding, error) {
+func (s *Service) ComputeEmbeddings(ctx context.Context, texts []string) ([]domain.Embedding, error) {
 	if len(texts) == 0 {
 		return nil, errors.New("texts cannot be empty")
 	}
 
-	embeddings := make([]embedding.Embedding, len(texts))
+	embeddings := make([]domain.Embedding, len(texts))
 	for i, text := range texts {
 		embedding, err := s.ComputeEmbedding(ctx, text)
 		if err != nil {
@@ -60,7 +60,7 @@ func (s *Service) GetModel() string {
 }
 
 // ValidateEmbedding validates that the embedding has the expected dimensions
-func (s *Service) ValidateEmbedding(embedding embedding.Embedding, expectedDim int) error {
+func (s *Service) ValidateEmbedding(embedding domain.Embedding, expectedDim int) error {
 	if len(embedding) != expectedDim {
 		return fmt.Errorf("embedding dimension mismatch: expected %d, got %d", expectedDim, len(embedding))
 	}

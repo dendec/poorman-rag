@@ -15,12 +15,13 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/dendec/poorman-rag/internal/config"
-	"github.com/dendec/poorman-rag/internal/infrastructure/embedding/loader"
 	embedding_api "github.com/dendec/poorman-rag/internal/api/embedding"
+	"github.com/dendec/poorman-rag/internal/config"
+	"github.com/dendec/poorman-rag/internal/domain"
+	"github.com/dendec/poorman-rag/internal/infrastructure/embedding"
 )
 
-var embeddingAPIAdapter *embedding_api.APIAdapter
+var embeddingAPIAdapter *embedding_api.Handler
 
 func init() {
 	InitSlog()
@@ -34,13 +35,13 @@ func initializeService() error {
 	}
 
 	// Load the embedding service using the loader
-	service, err := loader.LoadEmbeddingService(cfg)
+	service, err := embedding.LoadEmbeddingService(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize embedding service: %w", err)
 	}
 
 	// Create the API adapter
-	embeddingAPIAdapter = embedding_api.NewAPIAdapter(service)
+	embeddingAPIAdapter = embedding_api.NewHandler(service)
 
 	return nil
 }
@@ -51,7 +52,7 @@ func handleRequest(ctx context.Context, request events.APIGatewayV2HTTPRequest) 
 		return events.APIGatewayV2HTTPResponse{StatusCode: 405, Body: "Method Not Allowed"}, nil
 	}
 
-	var embeddingReq embedding_api.EmbeddingRequest
+	var embeddingReq domain.EmbeddingRequest
 	if err := json.Unmarshal([]byte(request.Body), &embeddingReq); err != nil {
 		slog.Error("invalid request body", "error", err)
 		return events.APIGatewayV2HTTPResponse{StatusCode: 400, Body: "Invalid JSON"}, nil
@@ -88,7 +89,7 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var embeddingReq embedding_api.EmbeddingRequest
+	var embeddingReq domain.EmbeddingRequest
 	if err := json.Unmarshal(body, &embeddingReq); err != nil {
 		slog.Error("invalid request body", "error", err)
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -117,7 +118,7 @@ func cliHandler(text string) error {
 	}
 
 	// Output as JSON
-	result := embedding_api.EmbeddingObj{
+	result := domain.EmbeddingResult{
 		Object:    "embedding",
 		Index:     0,
 		Embedding: embedding,

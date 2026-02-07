@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/dendec/poorman-rag/internal/embedding"
+	"github.com/dendec/poorman-rag/internal/domain"
 	"github.com/lancedb/lancedb-go/pkg/contracts"
 	"github.com/lancedb/lancedb-go/pkg/lancedb"
 )
@@ -46,7 +46,7 @@ type Result struct {
 type LanceDBRepository struct {
 	db          contracts.IConnection
 	table       contracts.ITable
-	embedder    embedding.Embedder
+	embedder    domain.Embedder
 	queryPrefix string
 
 	// RRF Parameters
@@ -58,7 +58,7 @@ type LanceDBRepository struct {
 
 type NewOption func(*LanceDBRepository)
 
-func NewLanceDBRepository(uri, tableName string, dim int, embedder embedding.Embedder, opts ...NewOption) (*LanceDBRepository, error) {
+func NewLanceDBRepository(uri, tableName string, dim int, embedder domain.Embedder, opts ...NewOption) (*LanceDBRepository, error) {
 	ctx := context.Background()
 
 	// 1. LanceDB Connection

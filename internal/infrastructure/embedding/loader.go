@@ -1,4 +1,4 @@
-package loader
+package embedding
 
 import (
 	"fmt"
@@ -7,12 +7,12 @@ import (
 
 	"github.com/dendec/poorman-rag/internal/config"
 	"github.com/dendec/poorman-rag/internal/embedding/onnx" // Use the original package
-	embedding_service "github.com/dendec/poorman-rag/internal/services/embedding"
+	"github.com/dendec/poorman-rag/internal/services/embedding"
 	"github.com/dendec/poorman-rag/internal/utils"
 )
 
 // LoadEmbeddingService creates an embedding service with the appropriate embedder
-func LoadEmbeddingService(cfg *config.Config) (*embedding_service.Service, error) {
+func LoadEmbeddingService(cfg *config.Config) (*embedding.Service, error) {
 	libPath := findLibraryPath()
 	if libPath == "" {
 		return nil, fmt.Errorf("libonnxruntime.so not found in any of the expected locations")
@@ -29,8 +29,8 @@ func LoadEmbeddingService(cfg *config.Config) (*embedding_service.Service, error
 	if err != nil {
 		return nil, fmt.Errorf("model_config.json missing or invalid: %w", err)
 	}
-	onnxCfg.ModelPath = modelFiles[0]      // onnx model is first file
-	onnxCfg.TokenizerPath = modelFiles[1]  // tokenizer is second file
+	onnxCfg.ModelPath = modelFiles[0]     // onnx model is first file
+	onnxCfg.TokenizerPath = modelFiles[1] // tokenizer is second file
 
 	// Create ONNX embedder
 	onnxEmbedder, err := onnx.NewGenericEmbedder(libPath, onnxCfg)
@@ -39,7 +39,7 @@ func LoadEmbeddingService(cfg *config.Config) (*embedding_service.Service, error
 	}
 
 	// Create and return the service
-	service := embedding_service.NewService(onnxEmbedder, cfg.ModelName)
+	service := embedding.NewService(onnxEmbedder, cfg.ModelName)
 	return service, nil
 }
 
@@ -47,10 +47,10 @@ func LoadEmbeddingService(cfg *config.Config) (*embedding_service.Service, error
 func findLibraryPath() string {
 	// Possible locations to search for the library
 	locations := []string{
-		"libonnxruntime.so",                    // Current directory
-		filepath.Join("lib", "libonnxruntime.so"), // lib/ subdirectory
-		filepath.Join("..", "lib", "libonnxruntime.so"), // Parent's lib/ subdirectory
-		filepath.Join("lib", "linux_amd64", "libonnxruntime.so"), // lib/linux_amd64/ subdirectory
+		"libonnxruntime.so",                                            // Current directory
+		filepath.Join("lib", "libonnxruntime.so"),                      // lib/ subdirectory
+		filepath.Join("..", "lib", "libonnxruntime.so"),                // Parent's lib/ subdirectory
+		filepath.Join("lib", "linux_amd64", "libonnxruntime.so"),       // lib/linux_amd64/ subdirectory
 		filepath.Join("..", "lib", "linux_amd64", "libonnxruntime.so"), // Parent's lib/linux_amd64/ subdirectory
 	}
 
@@ -70,7 +70,7 @@ func loadModelFiles(cfg *config.Config) ([]string, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("model name is required to determine model files")
 	}
-	
+
 	finalPaths := make([]string, len(keys))
 
 	toDownloadKeys := []string{}
