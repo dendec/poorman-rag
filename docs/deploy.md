@@ -10,12 +10,15 @@ Set these variables in your CI/CD or local shell before deploying:
 - `DIMENSIONS`: Embedding dimensions (default: `384`).
 
 ## 2. Build the Server
-The server must be compiled for Linux AMD64 and bundled with the ONNX runtime library.
+The simplest way to build the project is using the included `Makefile`, which handles all CGO flags and library linking correctly.
 
 ```bash
-GOOS=linux GOARCH=amd64 go build -o bootstrap cmd/mcp/main.go
-zip -j deployment.zip bootstrap lib/libonnxruntime.so
+# Clean and build everything
+make clean
+make build
 ```
+
+This creates a `bootstrap` binary and a `deployment.zip` containing the binary and necessary shared libraries (`libonnxruntime.so` and `liblancedb_go.so`) from `lib/linux_amd64/`.
 
 ## 3. Deploy
 Ensure you have the Serverless Framework installed and configured with AWS credentials.

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poorman-rag-indexer"
+version = "0.1.0"
+description = "Indexer component for Poorman RAG using LanceDB"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch",
+    "transformers",
+    "numpy",
+    "pyarrow",
+    "huggingface_hub",
+    "optimum",
+    "onnxruntime",
+    "lancedb",
+    "pylance",
+    "tantivy",
+    "tqdm",
+    "python-dotenv",
+    "pyyaml"
+]
+
+[tool.setuptools]
+packages = ["core"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"

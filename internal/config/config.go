@@ -4,8 +4,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -72,51 +70,9 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// 3. Override with Environment Variables (Priority: Env > File)
-	if v := os.Getenv("RAG_BUCKET"); v != "" {
-		cfg.Bucket = v
-	}
-	if v := os.Getenv("RAG_KB_ALIASES"); v != "" {
-		cfg.Aliases = strings.Split(v, ",")
-	} else if cfg.KBAlias != "" {
+	// 3. Set defaults for aliases if KBAlias is set but Aliases is empty
+	if cfg.KBAlias != "" && len(cfg.Aliases) == 0 {
 		cfg.Aliases = []string{cfg.KBAlias}
-	}
-
-	if v := os.Getenv("RAG_S3_ENDPOINT"); v != "" {
-		cfg.S3Endpoint = v
-	}
-	if v := os.Getenv("RAG_S3_REGION"); v != "" {
-		cfg.S3Region = v
-	}
-	if v := os.Getenv("MODEL"); v != "" {
-		cfg.ModelName = v
-	}
-	if v := os.Getenv("RAG_MODELS_DIR"); v != "" {
-		cfg.ModelsDir = v
-	}
-	if v := os.Getenv("RAG_INDEX_DIR"); v != "" {
-		cfg.IndexDir = v
-	}
-
-	if v := os.Getenv("RAG_RRF_K"); v != "" {
-		if i, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.RRFK = i
-		}
-	}
-	if v := os.Getenv("RAG_LIMIT_VECTOR"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.LimitVector = i
-		}
-	}
-	if v := os.Getenv("RAG_LIMIT_FTS"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.LimitFTS = i
-		}
-	}
-	if v := os.Getenv("RAG_TOP_K"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.TopK = i
-		}
 	}
 
 	// 4. Set Defaults if still empty

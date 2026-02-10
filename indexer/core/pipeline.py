@@ -106,7 +106,7 @@ class IndexingPipeline:
                     self._process_gpu_batch(current_counter)
                 
                 if not self.shutdown_requested:
-                     self.flush(new_cursor=current_counter)
+                    self.flush(new_cursor=current_counter)
 
         except Exception as e:
             logger.error(f"Pipeline failed: {e}", exc_info=True)
@@ -135,7 +135,7 @@ class IndexingPipeline:
     def flush(self, new_cursor: int):
         """Saves batch and updates source position cursor"""
         if self.batch:
-            logger.info(f"Flushing {len(self.batch)} records to storage (cursor={new_cursor})")
+            logger.debug(f"Flushing {len(self.batch)} records to storage (cursor={new_cursor})")
             self.storage.save_batch(self.batch, new_cursor)
             self.batch = []
         else:

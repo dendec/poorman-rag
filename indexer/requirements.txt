@@ -5,8 +5,10 @@ pyarrow
 huggingface_hub
 optimum
 onnxruntime
-zstandard
-usearch
+lancedb
+pylance
+tantivy
 tqdm
 python-dotenv
 pyyaml
+boto3

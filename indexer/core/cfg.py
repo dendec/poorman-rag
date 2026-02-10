@@ -7,10 +7,12 @@ logger = logging.getLogger("indexer.config")
 
 @dataclass
 class IndexingConfig:
-    db_file: str
-    index_file: str
+    lancedb_uri: str
+    table_name: str = "dataset"
     dataset_repo: str = ""
+    datasource: str = ""
     target_dir: str = ""
+    vector_dtype: str = "float32"  # float32, float16, int8
     # Indexing parameters
     checkpoint_period: int = 100
     min_tokens: int = 5

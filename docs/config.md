@@ -5,8 +5,8 @@
 ## 1. Indexer Configuration (`config.yaml`)
 
 ### Storage Paths
-- `db_file`: Path to the local SQLite database.
-- `index_file`: Path to the local vector index file.
+- `lancedb_uri`: Directory where the LanceDB database is stored (e.g., `./index/data`).
+- `table_name`: The name of the table inside LanceDB (default: `dataset`).
 - `target_dir`: Directory containing documents to index.
 - `extensions`: List of file extensions to include (e.g., `[".txt", ".md"]`).
 

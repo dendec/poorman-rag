@@ -1,9 +1,10 @@
 # poorman-rag Indexer Sample Configuration
 
 # Storage paths
-db_file: "content.sqlite"
-index_file: "vectors.usearch"
+lancedb_uri: "index/lancedb"
+table_name: "dataset"
 target_dir: "./docs"
+datasource: "core.datasource.FolderDataSource"
 extensions: [".txt", ".md", ".markdown"]
 
 # S3-compatible Storage (Multicloud)
