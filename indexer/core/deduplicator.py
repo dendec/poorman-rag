@@ -4,11 +4,11 @@ import unicodedata
 from typing import Optional, Set, Dict
 
 class Deduplicator:
-    def __init__(self, preload: Set[str] = None):
-        self.seen_hashes: Set[str] = preload if preload else set()
+    def __init__(self, preload: Set[bytes] = None):
+        self.seen_hashes: Set[bytes] = preload if preload else set()
 
     def is_duplicate(self, cleaned_text: str) -> bool:
-        text_hash = hashlib.md5(cleaned_text.encode('utf-8')).hexdigest()
+        text_hash = hashlib.md5(cleaned_text.encode('utf-8')).digest()
         if text_hash in self.seen_hashes:
             return True
         self.seen_hashes.add(text_hash)

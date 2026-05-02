@@ -10,8 +10,10 @@ logger = logging.getLogger("indexer.datasource")
 @dataclass
 class DataEntry:
     embedding_text: str
-    storage_text: str
+    text: Optional[str] = None
+    fts_text: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    index_key: Optional[str] = None  # Routing key for multi-index mode
 
 class DataSource(ContextManager):
     """
@@ -37,12 +39,10 @@ class FolderDataSource(DataSource):
     """
     def __init__(
         self, 
-        base_path: str, 
         config: IndexingConfig,
-        tokenizer: Any,
-        extensions: Optional[List[str]] = None
+        tokenizer: Any
     ):
-        self.base_path = base_path
+        self.target = config.target
         self.config = config
         self.tokenizer = tokenizer
         self.chunker = TokenChunker(
@@ -50,21 +50,21 @@ class FolderDataSource(DataSource):
             chunk_size=config.chunk_size, 
             chunk_overlap=config.chunk_overlap
         )
-        self.extensions = extensions or config.extensions
+        self.extensions = config.extensions
         self._files = self._collect_files()
 
     def _collect_files(self) -> List[str]:
         collected = []
-        if not os.path.exists(self.base_path):
-             logger.error(f"Directory not found: {self.base_path}")
+        if not os.path.exists(self.target):
+             logger.error(f"Directory not found: {self.target}")
              return []
              
-        for root, _, files in os.walk(self.base_path):
+        for root, _, files in os.walk(self.target):
             for file in files:
                 if any(file.endswith(ext) for ext in self.extensions):
                     collected.append(os.path.join(root, file))
         
-        logger.info(f"Found {len(collected)} files in {self.base_path}")
+        logger.info(f"Found {len(collected)} files in {self.target}")
         return collected
 
     def __iter__(self) -> Iterator[DataEntry]:
@@ -85,7 +85,7 @@ class FolderDataSource(DataSource):
                         embedding_text = f"File: {filename}\n{chunk}"
                         
                         # 2. Clean text for LLM to save tokens
-                        storage_text = chunk
+                        text = chunk
                         
                         # 3. Structural metadata for system/UI
                         metadata = {
@@ -97,7 +97,7 @@ class FolderDataSource(DataSource):
                         
                         yield DataEntry(
                             embedding_text=embedding_text,
-                            storage_text=storage_text,
+                            text=text,
                             metadata=metadata
                         )
             except Exception as e:
