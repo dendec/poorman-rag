@@ -103,3 +103,24 @@ class TokenChunker:
             chunks.append("".join(current_chunk_pieces))
 
         return chunks
+
+    def crop(self, text: str, max_tokens: int) -> str:
+        """
+        Crops text to roughly max_tokens and ends at a sentence boundary (.!? or \n).
+        """
+        tokens = self.tokenizer.encode(text, add_special_tokens=False)
+        
+        if len(tokens) <= max_tokens:
+            return text
+            
+        # Take the prefix
+        truncated_tokens = tokens[:max_tokens]
+        truncated_text = self.tokenizer.decode(truncated_tokens, skip_special_tokens=True)
+        
+        # Find the last sentence boundary: . ! ? or newline
+        # We look for the last occurrence of these characters
+        match = re.search(r'([.!?\n])[^.!?\n]*$', truncated_text)
+        if match:
+            return truncated_text[:match.start() + 1].strip()
+            
+        return truncated_text.strip()
