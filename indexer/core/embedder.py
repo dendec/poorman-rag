@@ -3,8 +3,11 @@ import logging
 import numpy as np
 import torch
 import torch.nn.functional as F
-from typing import List
+from typing import List, Optional, Any, TYPE_CHECKING
 from transformers import AutoTokenizer, AutoModel
+
+if TYPE_CHECKING:
+    from core.cfg import IndexingConfig
 
 logger = logging.getLogger("indexer.embedder")
 
@@ -23,59 +26,78 @@ def _last_token_pooling(model_output, attention_mask):
     return token_embeddings[torch.arange(token_embeddings.size(0)), last_token_indices]
 
 class Embedder:
-    def __init__(self, model_name: str, device: str | None = None, compile_model: bool = False, max_length: int = 512, vector_dtype: str = "float32", load_model: bool = True, pooling_mode: str = "mean"):
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(
+        self, 
+        model_name: str, 
+        device: str = "auto", 
+        max_length: int = 512, 
+        vector_dtype: str = "float32", 
+        pooling_mode: str = "mean",
+        compile_model: bool = False,
+        load_model: bool = True
+    ):
+        self.model_name = model_name
+        
+        if device == "auto":
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
+            
         self.max_length = max_length
         self.vector_dtype = vector_dtype.lower()
         self.pooling_mode = pooling_mode.lower()
+        self.compile_model = compile_model
+        
+        logger.info(f"🚀 Initializing Embedder on {self.device}")
 
-        # Resolve tokenizer: prefer local directory (has tokenizer files), 
-        # then fall back to HF cache (local_files_only=True, no network).
-        slug = model_name.split("/")[-1]
-        tokenizer_source = model_name  # default: HF cache lookup by name
-        for candidate in [model_name, f"models/{slug}", f"indexer/models/{slug}"]:
+        # Resolve tokenizer: prefer local directory
+        slug = self.model_name.split("/")[-1]
+        tokenizer_source = self.model_name
+        for candidate in [self.model_name, f"models/{slug}", f"indexer/models/{slug}"]:
             if os.path.isdir(candidate) and os.path.exists(os.path.join(candidate, "tokenizer_config.json")):
                 tokenizer_source = candidate
                 logger.info(f"Using local tokenizer: {candidate}")
                 break
-
-        logger.info(f"Embedder loading on {self.device} (compile={compile_model}, max_length={max_length})...")
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, trust_remote_code=True)
-
+        
+        self.token = os.getenv("HF_TOKEN")
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, token=self.token, trust_remote_code=True)
+        # Separate tokenizer instance for thread-safe use in producer thread.
+        self._producer_tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, token=self.token, trust_remote_code=True)
+        
         self.model = None
         if load_model:
-            # Check if we should use the local path for weights too
-            model_source = tokenizer_source
-            weight_files = ["model.safetensors", "pytorch_model.bin", "model.pt"]
-            is_local = os.path.isdir(tokenizer_source)
-            has_weights = any(os.path.exists(os.path.join(tokenizer_source, f)) for f in weight_files)
-            
-            if is_local and not has_weights:
-                logger.info(f"Local directory {tokenizer_source} has no PyTorch weights, falling back to HF Hub for model.")
-                model_source = model_name
-
-            # Load PyTorch model
+            logger.info(f"Embedder loading on {self.device} (compile={compile_model}, max_length={max_length})...")
             self.model = AutoModel.from_pretrained(
-                model_source,
+                self.model_name, 
+                token=self.token,
                 trust_remote_code=True
-            ).to(self.device).to(torch.float16 if self.device == "cuda" else torch.float32)
-            self.model.eval()
-
+            ).to(self.device).to(torch.float32)
+            
             if compile_model and self.device == "cuda" and hasattr(torch, "compile"):
                 try:
                     logger.info("🚀 Compiling model for optimized inference...")
                     self.model = torch.compile(self.model)
                 except Exception as e:
                     logger.warning(f"Compile skipped: {e}")
+            
+            self.model.eval()
 
-        # Separate tokenizer instance for thread-safe use in producer thread.
-        # HuggingFace Fast Tokenizers (Rust-backed) are NOT thread-safe.
-        self._producer_tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, trust_remote_code=True)
+    @classmethod
+    def from_config(cls, config: "IndexingConfig", **kwargs) -> "Embedder":
+        """Factory method to create an Embedder from a config object."""
+        return cls(
+            model_name=config.model_name,
+            device=kwargs.get("device", config.device if hasattr(config, "device") else "auto"),
+            max_length=config.max_tokens,
+            vector_dtype=config.vector_dtype,
+            pooling_mode=config.pooling_mode,
+            compile_model=config.compile_model,
+            load_model=kwargs.get("load_model", config.enable_vector_index)
+        )
 
     def embed(self, texts: List[str]) -> np.ndarray:
         if self.model is None:
-            # If vectors are disabled, return empty arrays (or zeros)
-            return np.zeros((len(texts), 384), dtype=np.float32)
+            raise RuntimeError(f"Model not loaded for embedder {self.model_name}. Cannot generate embeddings.")
             
         encoded = self.tokenizer(
             texts,
@@ -85,7 +107,7 @@ class Embedder:
             return_tensors="pt"
         ).to(self.device)
 
-        with torch.no_grad():
+        with torch.inference_mode():
             if self.device == "cuda":
                 with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                     model_out = self.model(**encoded)
@@ -98,9 +120,24 @@ class Embedder:
             emb = _mean_pooling(model_out, encoded["attention_mask"])
             
         emb = F.normalize(emb, p=2, dim=1)
+
+        # Explicit cleanup to help CUDA GC
+        del encoded
+        del model_out
+        if torch.isnan(emb).any():
+            logger.error("NaN detected in embeddings!")
+            emb = torch.nan_to_num(emb)
+
+        emb = F.normalize(emb, p=2, dim=1, eps=1e-6)
         res = emb.cpu().float().numpy()
 
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+
         if self.vector_dtype in ["int8", "i8"]:
+            # Check for NaN again in numpy just in case
+            if np.isnan(res).any():
+                res = np.nan_to_num(res)
             return (res * 127).astype(np.int8)
         elif self.vector_dtype in ["float16", "f16"]:
             return res.astype(np.float16)

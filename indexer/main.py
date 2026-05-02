@@ -5,6 +5,9 @@ import logging
 from typing import Any
 import torch
 from transformers import AutoTokenizer
+from dotenv import load_dotenv
+
+load_dotenv()
 
 if torch.cuda.is_available():
     torch.set_float32_matmul_precision('high')
@@ -120,7 +123,7 @@ def handle_recall(args, config, logger):
     
     # Get random records
     cursor = search_engine.conn.execute(
-        "SELECT id, text FROM dataset ORDER BY RANDOM() LIMIT ?", 
+        "SELECT id, text, metadata FROM dataset ORDER BY RANDOM() LIMIT ?", 
         (args.count,)
     )
     test_data = cursor.fetchall()
@@ -129,6 +132,17 @@ def handle_recall(args, config, logger):
         logger.error("❌ Database is empty. Cannot run recall test.")
         return
 
+    # Get DataSource to generate tailored queries
+    try:
+        from core.embedder import Embedder
+        from transformers import AutoTokenizer
+        # Minimal tokenizer load just for DataSource
+        tokenizer = AutoTokenizer.from_pretrained(config.model_name, trust_remote_code=True)
+        source = get_datasource(config, tokenizer)
+    except Exception as e:
+        logger.error(f"❌ Could not initialize datasource for recall: {e}")
+        return
+        
     recalls = []
     logger.info(f"🔍 Processing samples...")
     
@@ -136,19 +150,17 @@ def handle_recall(args, config, logger):
         doc_id, text = row['id'], row['text']
         if not text: continue
         
-        # Use a random chunk of text as a query to make it a real semantic test
-        text_len = len(text)
-        if text_len <= 200:
-            query = text
-        else:
-            import random
-            start_idx = random.randint(0, text_len - 200)
-            query = text[start_idx : start_idx + 200]
+        # Reconstruct metadata
+        import json
+        meta = json.loads(row['metadata']) if row['metadata'] else {}
+        
+        # Use datasource to generate a tailored, realistic query
+        raw_query = source.get_recall_query(text, meta)
+        query = config.query_prefix + raw_query
         
         # Vector search only
         try:
-            prefixed_query = config.query_prefix + query
-            vec = search_engine.embed.embed([prefixed_query])[0].flatten()
+            vec = search_engine.embed.embed([query])[0].flatten()
             matches = search_engine.index.search(vec, args.k)
             vector_ids = matches.keys.tolist()
             
