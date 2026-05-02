@@ -1,7 +1,7 @@
 import yaml
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Dict
+from typing import List, Optional, Dict
 
 logger = logging.getLogger("indexer.config")
 
@@ -33,6 +33,7 @@ class IndexingConfig:
     prefix: str = "passage: "
     index_metric: str = "cos"
     vector_dtype: str = "f16"
+    device: str = "auto"  # "auto", "cuda", or "cpu"
     
     # FTS5 settings
     fts_mode: str = "speed"

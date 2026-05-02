@@ -39,13 +39,7 @@ class Search:
                     self.index = Index(ndim=config.vector_dim, metric=config.index_metric, dtype=config.vector_dtype)
                     self.index.view(config.index_file)
 
-                self.embed = Embedder(
-                    config.model_name, 
-                    device="cpu", 
-                    max_length=config.max_tokens,
-                    vector_dtype=config.vector_dtype,
-                    pooling_mode=config.pooling_mode
-                )
+                self.embed = Embedder.from_config(config, device="cpu")
         
         status = f"Search engine ready. Vectors: {len(self.index) if self.index else 'OFF'}"
         logger.info(status)
@@ -120,6 +114,35 @@ class Search:
     def close(self):
         self.conn.close()
 
+    def _pretty_print(self, doc_id: int, text: str):
+        """Attempts to decode and pretty-print the result text."""
+        print(f"🔹 [ID:{doc_id}]", end=" ")
+        
+        # 1. Try Toon format
+        try:
+            from toon_format import decode
+            data = decode(text)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    val = (v[:150] + "...") if len(v) > 150 else v
+                    print(f"{k}: {val}")
+                return
+        except: pass
+
+        # 2. Try JSON
+        try:
+            import json
+            data = json.loads(text)
+            if isinstance(data, dict):
+                print(f"JSON Data:")
+                print(json.dumps(data, indent=2, ensure_ascii=False))
+                return
+        except: pass
+
+        # 3. Fallback: Plain text (truncated)
+        snippet = (text[:300] + "...") if len(text) > 300 else text
+        print(f"Text: {snippet}")
+
     def loop(self):
         """CLI loop for manual testing."""
         logger.info("Entering search interactive loop (/exit to quit)")
@@ -135,7 +158,7 @@ class Search:
                 elapsed = time.perf_counter() - start
                 print(f"\nFound {len(results)} matches in {elapsed*1000:.1f} ms:")
                 for doc_id, txt in results:
-                    print(f"🔹 [ID:{doc_id}] {txt}")
+                    self._pretty_print(doc_id, txt)
                 print("-" * 40 + "\n")
         finally:
             self.close()

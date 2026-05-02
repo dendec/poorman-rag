@@ -208,6 +208,17 @@ class Storage:
                 with open(zst_file, 'wb') as f_out:
                     cctx.copy_stream(f_in, f_out)
             logger.info(f"Compression complete in {time.time() - start:.2f}s")
+
+        # 3. Compress Vector Index
+        if self._index_file and os.path.exists(self._index_file):
+            zst_idx = self._index_file + ".zst"
+            logger.info(f"Compressing vector index: {self._index_file} -> {zst_idx}")
+            start = time.time()
+            cctx = zstd.ZstdCompressor(level=3)
+            with open(self._index_file, 'rb') as f_in:
+                with open(zst_idx, 'wb') as f_out:
+                    cctx.copy_stream(f_in, f_out)
+            logger.info(f"Compression complete in {time.time() - start:.2f}s")
             
         # 4. Automate upload to S3 if configured
         uploader = get_uploader_from_config(self.cfg)
@@ -220,5 +231,7 @@ class Storage:
             db_ext = ".sqlite.zst" if db_local.endswith(".zst") else ".sqlite"
             uploader.upload_file(db_local, f"rag/index/{alias}/dataset{db_ext}")
             
-            # Upload Index
-            uploader.upload_file(self.cfg.index_file, f"rag/index/{alias}/vectors.usearch")
+            # Upload Index (.zst if exists, else .usearch)
+            idx_local = self._index_file + ".zst" if os.path.exists(self._index_file + ".zst") else self._index_file
+            idx_ext = ".usearch.zst" if idx_local.endswith(".zst") else ".usearch"
+            uploader.upload_file(idx_local, f"rag/index/{alias}/vectors{idx_ext}")
