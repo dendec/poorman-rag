@@ -7,15 +7,21 @@ logger = logging.getLogger("indexer.config")
 
 @dataclass
 class IndexingConfig:
-    db_file: str
-    index_file: str
+    db_file: str = "index/dataset.sqlite"
+    index_file: str = "index/vectors.usearch"
     dataset_repo: str = ""
-    target_dir: str = ""
+    target: str = ""
+    extensions: List[str] = field(default_factory=lambda: [".txt", ".md", ".markdown"])
+    output_dir: str = ""  # If set, enables multi-index mode (one index per index_key)
+    min_index_entries: int = 10  # Minimum records per index_key to create an index
+    datasource: str = "core.datasource.FolderDataSource"
     # Indexing parameters
     checkpoint_period: int = 100
     min_tokens: int = 5
     max_tokens: int = 512
     batch_size: int = 32
+    enable_vector_index: bool = True
+
     
     # Chunking parameters in tokens
     chunk_size: int = 400
@@ -26,12 +32,13 @@ class IndexingConfig:
     model_name: str = "intfloat/multilingual-e5-small"
     prefix: str = "passage: "
     index_metric: str = "cos"
-    index_dtype: str = "f16"
+    vector_dtype: str = "f16"
     
     # FTS5 settings
     fts_mode: str = "speed"
     compile_model: bool = True
     query_prefix: str = "query: "
+    pooling_mode: str = "mean" # "mean" or "last"
 
     # RRF (Hybrid Search) settings
     rrf_k: int = 60
@@ -53,7 +60,7 @@ class IndexingConfig:
 
     # File extensions to index
     extensions: list[str] = field(default_factory=lambda: [".txt", ".md", ".markdown"])
-
+    
     def validate(self):
         """Validates configuration parameters."""
         if self.chunk_size > self.max_tokens:

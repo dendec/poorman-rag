@@ -11,27 +11,48 @@ logger = logging.getLogger("indexer.search")
 
 class Search:
     def __init__(self, config: IndexingConfig):
-        if not os.path.exists(config.db_file) or not os.path.exists(config.index_file):
-            logger.error(f"Missing search files: {config.db_file} or {config.index_file}")
-            raise FileNotFoundError("Database or Index file missing!")
-
         # 1. SQLite (Read-Only)
+        if not os.path.exists(config.db_file):
+            logger.error(f"Missing database file: {config.db_file}")
+            raise FileNotFoundError("Database file missing!")
+        
         self.conn = sqlite3.connect(f"file:{config.db_file}?mode=ro", uri=True, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
-        # 2. Vector Index
-        try:
-            self.index = Index.restore(config.index_file, view=True)
-        except Exception as e:
-            logger.warning(f"Index restore failed, trying manual view: {e}")
-            self.index = Index(ndim=config.vector_dim, metric=config.index_metric, dtype=config.index_dtype)
-            self.index.view(config.index_file)
+        # Performance optimizations for large databases
+        self.conn.execute("PRAGMA mmap_size = 10737418240;")  # 10GB mmap
+        self.conn.execute("PRAGMA cache_size = -2000000;")    # ~2GB page cache
 
-        self.embed = Embedder(config.model_name, device="cpu", max_length=config.max_tokens)
+        # 2. Vector Index
+        self.index = None
+        self.embed = None
         self.cfg = config
-        logger.info(f"Search engine ready. Vectors: {len(self.index)}")
+
+        if getattr(config, "enable_vector_index", True):
+            if not os.path.exists(config.index_file):
+                logger.warning(f"Vector index file missing: {config.index_file}. Vector search will be disabled.")
+            else:
+                try:
+                    self.index = Index.restore(config.index_file, view=True)
+                except Exception as e:
+                    logger.warning(f"Index restore failed, trying manual view: {e}")
+                    self.index = Index(ndim=config.vector_dim, metric=config.index_metric, dtype=config.vector_dtype)
+                    self.index.view(config.index_file)
+
+                self.embed = Embedder(
+                    config.model_name, 
+                    device="cpu", 
+                    max_length=config.max_tokens,
+                    vector_dtype=config.vector_dtype,
+                    pooling_mode=config.pooling_mode
+                )
+        
+        status = f"Search engine ready. Vectors: {len(self.index) if self.index else 'OFF'}"
+        logger.info(status)
 
     def _search_vector(self, query: str, limit: int):
+        if self.index is None or self.embed is None:
+            return []
         try:
             prefixed_query = self.cfg.query_prefix + query
             vec = self.embed.embed([prefixed_query])[0].flatten()
@@ -44,8 +65,14 @@ class Search:
     def _search_fts(self, query: str, limit: int):
         try:
             safe_query = query.replace('"', '').replace("'", "")
+            # Determine whether to use 'id' or 'rowid' (for compatibility between speed/external modes)
+            # In 'speed' mode we have an explicit 'id' column, in 'external' rowid is the source id.
+            cursor = self.conn.execute("PRAGMA table_info(dataset_fts)")
+            columns = [row['name'] for row in cursor.fetchall()]
+            id_col = "id" if "id" in columns else "rowid"
+
             sql = f"""
-                SELECT rowid
+                SELECT {id_col}
                 FROM dataset_fts
                 WHERE dataset_fts MATCH ?
                 ORDER BY rank
