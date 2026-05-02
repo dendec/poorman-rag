@@ -1,28 +1,22 @@
 # poorman-rag Indexer Sample Configuration
 
 # Storage paths
-db_file: "content.sqlite"
-index_file: "vectors.usearch"
-target_dir: "./docs"
-extensions: [".txt", ".md", ".markdown"]
-
-# S3-compatible Storage (Multicloud)
-s3_bucket: "my-rag-bucket"
-kb_alias: "docs"
-# s3_endpoint: "https://storage.googleapis.com" # For GCP
-# s3_region: "us-east-1"
-# s3_access_key: "ROOTUSER"
-# s3_secret_key: "MINIO123"
+db_file: "index/dataset.sqlite"
+index_file: "index/vectors.usearch"
+# target: "path/to/your/files" # Local folder to index
+# datasource: "core.datasources.folder.FolderDataSource"
 
 # Model settings
 model_name: "intfloat/multilingual-e5-small"
 vector_dim: 384
+vector_dtype: "f16"
 max_tokens: 512
+pooling_mode: "mean" # "mean" for BERT/E5, "last" for Qwen/Causal models
 prefix: "passage: "
 query_prefix: "query: "
+compile_model: true
 
 # Chunking settings (In TOKENS)
-# chunk_size should be <= max_tokens
 chunk_size: 400
 chunk_overlap: 50
 
@@ -37,7 +31,8 @@ fts_mode: "speed"
 
 # Indexing batch parameters
 batch_size: 32
-checkpoint_period: 100
+checkpoint_period: 1000
+enable_vector_index: true
 
 # Normalization (optional)
 # normalization_mapping:

@@ -28,9 +28,14 @@ models/
 index/
 indexer/models/
 indexer/index/
+indexer/_data_cache/
+indexer/*.sqlite
+indexer/*.usearch
+indexer/config_*.yaml
 .indexer/
 config.yaml
 !indexer/config.yaml.example
+!indexer/config.example.yaml
 
 # Temporary and local
 /tmp/
