@@ -32,6 +32,14 @@ class DataSource(ContextManager):
         """Returns total record count (estimated as number of files)."""
         return 0
 
+    def skip(self, n: int):
+        """Skips N records efficiently without loading them."""
+        pass
+
+    def get_recall_query(self, text: str, metadata: Dict[str, Any]) -> str:
+        """Generates a realistic query for recall evaluation."""
+        return text[:200]
+
 class FolderDataSource(DataSource):
     """
     A DataSource that scans a local directory for text files and chunks them using tokens.
@@ -102,6 +110,12 @@ class FolderDataSource(DataSource):
                         )
             except Exception as e:
                 logger.error(f"Error reading {file_path}: {e}", exc_info=True)
+
+    def skip(self, n: int):
+        """Efficiently skip already processed files."""
+        if n > 0:
+            logger.info(f"⏭️ Skipping first {n} files in folder datasource...")
+            self._files = self._files[n:]
 
     def __len__(self) -> int:
         return len(self._files)

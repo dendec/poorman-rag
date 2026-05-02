@@ -39,14 +39,7 @@ class IndexingPipeline:
             pre_hashes = self.storage.load_hashes(self.processor)
 
         self.deduplicator = Deduplicator(pre_hashes)
-        self.embedder = Embedder(
-            config.model_name,
-            compile_model=config.compile_model,
-            max_length=config.max_tokens,
-            vector_dtype=config.vector_dtype,
-            load_model=config.enable_vector_index,
-            pooling_mode=config.pooling_mode
-        )
+        self.embedder = Embedder.from_config(config)
 
         self.gpu_buffer = []  # (emb_text, store_text, fts_text, metadata, index_key)
         self.shutdown_requested = False
@@ -122,7 +115,7 @@ class IndexingPipeline:
 
         logger.info(f"Starting pipeline (multi_index={self.multi_index}, batch_size={self.cfg.batch_size})")
         logger.info(f"Resuming from source offset: {self.processed_offset}")
-
+        
         # Queue holds ready-to-embed batches for the GPU thread.
         # Maxsize=2 means CPU can pre-prepare at most 1 extra batch ahead.
         batch_queue: queue_module.Queue = queue_module.Queue(maxsize=2)
@@ -130,72 +123,75 @@ class IndexingPipeline:
 
         def producer():
             """CPU thread: parse, clean, deduplicate, accumulate, enqueue batches."""
-            current_counter = 0
+            current_counter = self.processed_offset
             indexed_count = 0
             buffer = []
 
             try:
                 with self.source as stream:
+                    # Tell the source to skip already processed items if it can
+                    self.source.skip(self.processed_offset)
+                    
                     total_items = len(self.source)
-                    iterator = tqdm(stream, desc="Indexing", total=total_items, initial=self.processed_offset)
+                    with tqdm(desc="Indexing", total=total_items, initial=self.processed_offset) as pbar:
+                        for item in stream:
+                            if self.shutdown_requested:
+                                break
+                            if limit and indexed_count >= limit:
+                                break
 
-                    for item in iterator:
-                        if self.shutdown_requested:
-                            break
-                        if limit and indexed_count >= limit:
-                            break
+                            # --- Data extraction ---
+                            if hasattr(item, "embedding_text"):
+                                text_for_embedding = item.embedding_text
+                                text_for_storage   = item.text
+                                fts_text           = getattr(item, "fts_text", None)
+                                metadata           = getattr(item, "metadata", {})
+                                index_key          = getattr(item, "index_key", None)
+                            elif isinstance(item, dict):
+                                text_for_embedding = item.get("embedding_text", "")
+                                text_for_storage   = item.get("storage_text", text_for_embedding)
+                                fts_text           = item.get("fts_text", None)
+                                metadata           = item.get("metadata", {})
+                                index_key          = item.get("index_key", None)
+                            else:
+                                text_for_embedding = item
+                                text_for_storage   = item
+                                fts_text = None
+                                metadata = {}
+                                index_key = None
 
-                        # --- Data extraction ---
-                        if hasattr(item, "embedding_text"):
-                            text_for_embedding = item.embedding_text
-                            text_for_storage   = item.text
-                            fts_text           = getattr(item, "fts_text", None)
-                            metadata           = getattr(item, "metadata", {})
-                            index_key          = getattr(item, "index_key", None)
-                        elif isinstance(item, dict):
-                            text_for_embedding = item.get("embedding_text", "")
-                            text_for_storage   = item.get("storage_text", text_for_embedding)
-                            fts_text           = item.get("fts_text", None)
-                            metadata           = item.get("metadata", {})
-                            index_key          = item.get("index_key", None)
-                        else:
-                            text_for_embedding = item
-                            text_for_storage   = item
-                            fts_text = None
-                            metadata = {}
-                            index_key = None
-
-                        # --- Fast-Forward ---
-                        if current_counter < self.processed_offset:
+                            # --- Fast-Forward ---
+                            if current_counter < self.processed_offset:
+                                current_counter += 1
+                                continue
                             current_counter += 1
-                            continue
-                        current_counter += 1
+                            pbar.update(1)
 
-                        # --- Step 1: Cleaning ---
-                        cleaned = self.processor.clean(text_for_embedding)
-                        if not cleaned:
-                            continue
+                            # --- Step 1: Cleaning ---
+                            cleaned = self.processor.clean(text_for_embedding)
+                            if not cleaned:
+                                continue
 
-                        # --- Step 2: Deduplication ---
-                        if self.deduplicator.is_duplicate(cleaned):
-                            continue
+                            # --- Step 2: Deduplication ---
+                            if self.deduplicator.is_duplicate(cleaned):
+                                continue
 
-                        # --- Step 3: Token validation ---
-                        n_tokens = self.embedder.token_count(text_for_embedding)
-                        if n_tokens < self.cfg.min_tokens:
-                            continue
+                            # --- Step 3: Token validation ---
+                            n_tokens = self.embedder.token_count(text_for_embedding)
+                            if n_tokens < self.cfg.min_tokens:
+                                continue
 
-                        # --- Step 4: Accumulate ---
-                        buffer.append((text_for_embedding, text_for_storage, fts_text, metadata, index_key))
-                        indexed_count += 1
+                            # --- Step 4: Accumulate ---
+                            buffer.append((text_for_embedding, text_for_storage, fts_text, metadata, index_key))
+                            indexed_count += 1
 
-                        if len(buffer) >= self.cfg.batch_size:
-                            batch_queue.put((buffer, current_counter))
-                            buffer = []
+                            if len(buffer) >= self.cfg.batch_size:
+                                batch_queue.put((buffer, current_counter))
+                                buffer = []
 
-                # Enqueue remaining items
-                if buffer:
-                    batch_queue.put((buffer, current_counter))
+                    # Enqueue remaining items
+                    if buffer:
+                        batch_queue.put((buffer, current_counter))
             except Exception as e:
                 logger.error(f"Producer thread failed: {e}", exc_info=True)
             finally:
