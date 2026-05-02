@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -30,10 +31,11 @@ const (
 )
 
 type Result struct {
-	ID     int64   `json:"id"`
-	Text   string  `json:"text"`
-	Score  float64 `json:"score"`
-	Source Source  `json:"source"`
+	ID       int64                  `json:"id"`
+	Text     string                 `json:"text"`
+	Metadata map[string]interface{} `json:"metadata"`
+	Score    float64                `json:"score"`
+	Source   Source                 `json:"source"`
 }
 
 type Engine struct {
@@ -196,7 +198,7 @@ func (e *Engine) HybridSearch(ctx context.Context, query string) ([]Result, erro
 	}
 
 	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
-	querySQL := fmt.Sprintf("SELECT id, text FROM dataset WHERE id IN (%s)", placeholders)
+	querySQL := fmt.Sprintf("SELECT id, text, metadata FROM dataset WHERE id IN (%s)", placeholders)
 
 	rows, err := e.db.Query(querySQL, ids...)
 	if err != nil {
@@ -204,24 +206,34 @@ func (e *Engine) HybridSearch(ctx context.Context, query string) ([]Result, erro
 	}
 	defer rows.Close()
 
-	textMap := make(map[int64]string)
+	type dataRecord struct {
+		text     string
+		metadata map[string]interface{}
+	}
+	textMap := make(map[int64]dataRecord)
 	for rows.Next() {
 		var id int64
 		var text string
-		if err := rows.Scan(&id, &text); err != nil {
+		var metaStr sql.NullString
+		if err := rows.Scan(&id, &text, &metaStr); err != nil {
 			continue
 		}
-		textMap[id] = text
+		var meta map[string]interface{}
+		if metaStr.Valid && metaStr.String != "" {
+			json.Unmarshal([]byte(metaStr.String), &meta)
+		}
+		textMap[id] = dataRecord{text, meta}
 	}
 
 	results := make([]Result, 0, len(sorted))
 	for _, it := range sorted {
-		if txt, ok := textMap[it.id]; ok {
+		if rec, ok := textMap[it.id]; ok {
 			results = append(results, Result{
-				ID:     it.id,
-				Text:   txt,
-				Score:  it.score,
-				Source: sources[it.id],
+				ID:       it.id,
+				Text:     rec.text,
+				Metadata: rec.metadata,
+				Score:    it.score,
+				Source:   sources[it.id],
 			})
 		}
 	}
@@ -242,9 +254,9 @@ func (e *Engine) searchFTS(query string, limit int) ([]int64, error) {
 	}
 
 	ftsQuery := strings.Join(tokens, " OR ")
-	sql := `SELECT rowid FROM dataset_fts WHERE dataset_fts MATCH ? ORDER BY rank LIMIT ?`
+	querySQL := `SELECT rowid FROM dataset_fts WHERE dataset_fts MATCH ? ORDER BY rank LIMIT ?`
 
-	rows, err := e.db.Query(sql, ftsQuery, limit)
+	rows, err := e.db.Query(querySQL, ftsQuery, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -281,32 +293,42 @@ func (e *Engine) VectorSearch(ctx context.Context, query string) ([]Result, erro
 	}
 
 	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
-	sql := fmt.Sprintf("SELECT id, text FROM dataset WHERE id IN (%s)", placeholders)
+	querySQL := fmt.Sprintf("SELECT id, text, metadata FROM dataset WHERE id IN (%s)", placeholders)
 
-	rows, err := e.db.Query(sql, ids...)
+	rows, err := e.db.Query(querySQL, ids...)
 	if err != nil {
 		return nil, fmt.Errorf("db fetch error: %w", err)
 	}
 	defer rows.Close()
 
-	textMap := make(map[int64]string)
+	type dataRecord struct {
+		text     string
+		metadata map[string]interface{}
+	}
+	textMap := make(map[int64]dataRecord)
 	for rows.Next() {
 		var id int64
 		var text string
-		if err := rows.Scan(&id, &text); err != nil {
+		var metaStr sql.NullString
+		if err := rows.Scan(&id, &text, &metaStr); err != nil {
 			continue
 		}
-		textMap[id] = text
+		var meta map[string]interface{}
+		if metaStr.Valid && metaStr.String != "" {
+			json.Unmarshal([]byte(metaStr.String), &meta)
+		}
+		textMap[id] = dataRecord{text, meta}
 	}
 
 	results := make([]Result, 0, len(vectorIDs))
 	for i, id := range vectorIDs {
-		if txt, ok := textMap[int64(id)]; ok {
+		if rec, ok := textMap[int64(id)]; ok {
 			results = append(results, Result{
-				ID:     int64(id),
-				Text:   txt,
-				Score:  1.0 / (float64(i) + 1.0),
-				Source: Vector,
+				ID:       int64(id),
+				Text:     rec.text,
+				Metadata: rec.metadata,
+				Score:    1.0 / (float64(i) + 1.0),
+				Source:   Vector,
 			})
 		}
 	}
@@ -324,35 +346,45 @@ func (e *Engine) FTSSearch(ctx context.Context, query string) ([]Result, error) 
 	}
 
 	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
-	sql := fmt.Sprintf("SELECT id, text FROM dataset WHERE id IN (%s)", placeholders)
+	querySQL := fmt.Sprintf("SELECT id, text, metadata FROM dataset WHERE id IN (%s)", placeholders)
 	idsAny := make([]interface{}, len(ids))
 	for i, id := range ids {
 		idsAny[i] = id
 	}
-	rows, err := e.db.Query(sql, idsAny...)
+	rows, err := e.db.Query(querySQL, idsAny...)
 	if err != nil {
 		return nil, fmt.Errorf("db fetch error: %w", err)
 	}
 	defer rows.Close()
 
-	textMap := make(map[int64]string)
+	type dataRecord struct {
+		text     string
+		metadata map[string]interface{}
+	}
+	textMap := make(map[int64]dataRecord)
 	for rows.Next() {
 		var id int64
 		var text string
-		if err := rows.Scan(&id, &text); err != nil {
+		var metaStr sql.NullString
+		if err := rows.Scan(&id, &text, &metaStr); err != nil {
 			continue
 		}
-		textMap[id] = text
+		var meta map[string]interface{}
+		if metaStr.Valid && metaStr.String != "" {
+			json.Unmarshal([]byte(metaStr.String), &meta)
+		}
+		textMap[id] = dataRecord{text, meta}
 	}
 
 	results := make([]Result, 0, len(ids))
 	for i, id := range ids {
-		if txt, ok := textMap[id]; ok {
+		if rec, ok := textMap[id]; ok {
 			results = append(results, Result{
-				ID:     id,
-				Text:   txt,
-				Score:  1.0 / (float64(i) + 1.0),
-				Source: FTS,
+				ID:       id,
+				Text:     rec.text,
+				Metadata: rec.metadata,
+				Score:    1.0 / (float64(i) + 1.0),
+				Source:   FTS,
 			})
 		}
 	}

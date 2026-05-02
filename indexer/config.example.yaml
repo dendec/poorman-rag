@@ -1,0 +1,14 @@
+# Example configuration for Python indexer
+s3_bucket: "your-rag-data-bucket"
+s3_region: "eu-west-1"
+
+# Embedding model settings
+model:
+  name: "google/embeddinggemma-300m"
+  dimensions: 768
+
+# Knowledge bases to index
+kbs:
+  - name: "my_documentation"
+    source: "custom_api"
+    path: "rag/index/my_documentation"

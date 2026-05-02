@@ -1,0 +1,9 @@
+FROM public.ecr.aws/lambda/provided:al2023
+
+# Устанавливаем инструменты сборки один раз
+RUN dnf install -y golang gcc-c++ zip && dnf clean all
+
+# Переопределяем entrypoint для удобного запуска команд
+ENTRYPOINT ["/bin/bash", "-c"]
+
+WORKDIR /app

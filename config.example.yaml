@@ -1,0 +1,20 @@
+# Example configuration for poorman-rag Go service
+s3_bucket: "your-rag-data-bucket"
+s3_region: "eu-west-1"
+
+# List of knowledge bases (aliases)
+kb:
+  my_documentation:
+    model: "google/embeddinggemma-300m"
+    query_prefix: "Instruct: Retrieve semantically similar text.\nQuery: "
+    dimensions: 768
+    pooling: "mean"
+    top_k: 5
+    rrf_k: 60
+    limit_vector: 20
+    limit_fts: 20
+
+  another_kb:
+    model: "google/embeddinggemma-300m"
+    query_prefix: "Query: "
+    dimensions: 768

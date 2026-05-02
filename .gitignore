@@ -36,6 +36,9 @@ indexer/config_*.yaml
 config.yaml
 !indexer/config.yaml.example
 !indexer/config.example.yaml
+!config.example.yaml
+indexer/core/datasources/*
+!indexer/core/datasources/example.py
 
 # Temporary and local
 /tmp/
@@ -43,3 +46,9 @@ config.yaml
 .vscode/
 .idea/
 *.log
+config.yaml
+indexer/index/
+indexer/models/
+.env
+.serverless/
+dist/

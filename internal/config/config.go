@@ -4,33 +4,38 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
+type KBSettings struct {
+	ModelName   string  `yaml:"model_name"`
+	QueryPrefix string  `yaml:"query_prefix"`
+	PoolingMode string  `yaml:"pooling_mode"`
+	RRFK        float64 `yaml:"rrf_k"`
+	LimitVector int     `yaml:"limit_vector"`
+	LimitFTS    int     `yaml:"limit_fts"`
+	TopK        int     `yaml:"top_k"`
+	Dimensions  uint    `yaml:"dimensions"`
+	IndexDir    string  `yaml:"index_dir"` // Optional override
+	ModelDir    string  `yaml:"model_dir"` // Optional override
+}
+
 type Config struct {
-	// S3 / Cloud Storage
+	// S3 / Cloud Storage (Global)
 	Bucket      string `yaml:"s3_bucket"`
-	KBAlias     string `yaml:"kb_alias"` // Single alias in config.yaml
 	S3Endpoint  string `yaml:"s3_endpoint"`
 	S3Region    string `yaml:"s3_region"`
 	S3AccessKey string `yaml:"s3_access_key"`
 	S3SecretKey string `yaml:"s3_secret_key"`
 
-	// Model
-	ModelName string `yaml:"model_name"`
-	ModelsDir string `yaml:"models_dir"` // Optional explicit path to models directory
-	IndexDir  string `yaml:"index_dir"`  // Optional explicit path to index directory
+	ModelDir string `yaml:"model_dir"`
+	IndexDir string `yaml:"index_dir"`
 
-	// Search Tuning
-	RRFK        float64 `yaml:"rrf_k"`
-	LimitVector int     `yaml:"limit_vector"`
-	LimitFTS    int     `yaml:"limit_fts"`
-	TopK        int     `yaml:"top_k"`
+	// Knowledge Bases
+	KBs map[string]KBSettings `yaml:"kb"`
 
-	// Internal fields populated after load
+	// Internal fields
 	Aliases []string `yaml:"-"`
 }
 
@@ -72,66 +77,42 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// 3. Override with Environment Variables (Priority: Env > File)
+	// 3. Populate Aliases from Map
+	for name := range cfg.KBs {
+		cfg.Aliases = append(cfg.Aliases, name)
+	}
+
+	// 4. Override with Environment Variables (Global only for now)
 	if v := os.Getenv("RAG_BUCKET"); v != "" {
 		cfg.Bucket = v
 	}
-	if v := os.Getenv("RAG_KB_ALIASES"); v != "" {
-		cfg.Aliases = strings.Split(v, ",")
-	} else if cfg.KBAlias != "" {
-		cfg.Aliases = []string{cfg.KBAlias}
-	}
-
-	if v := os.Getenv("RAG_S3_ENDPOINT"); v != "" {
-		cfg.S3Endpoint = v
-	}
-	if v := os.Getenv("RAG_S3_REGION"); v != "" {
-		cfg.S3Region = v
-	}
-	if v := os.Getenv("MODEL"); v != "" {
-		cfg.ModelName = v
-	}
-	if v := os.Getenv("RAG_MODELS_DIR"); v != "" {
-		cfg.ModelsDir = v
+	if v := os.Getenv("RAG_MODEL_DIR"); v != "" {
+		cfg.ModelDir = v
 	}
 	if v := os.Getenv("RAG_INDEX_DIR"); v != "" {
 		cfg.IndexDir = v
 	}
 
-	if v := os.Getenv("RAG_RRF_K"); v != "" {
-		if i, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.RRFK = i
+	// 5. Apply defaults and sanitize each KB
+	for name, kb := range cfg.KBs {
+		if kb.RRFK == 0 {
+			kb.RRFK = 60
 		}
-	}
-	if v := os.Getenv("RAG_LIMIT_VECTOR"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.LimitVector = i
+		if kb.LimitVector == 0 {
+			kb.LimitVector = 20
 		}
-	}
-	if v := os.Getenv("RAG_LIMIT_FTS"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.LimitFTS = i
+		if kb.LimitFTS == 0 {
+			kb.LimitFTS = 20
 		}
-	}
-	if v := os.Getenv("RAG_TOP_K"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.TopK = i
+		if kb.TopK == 0 {
+			kb.TopK = 5
 		}
+		if kb.QueryPrefix == "" {
+			kb.QueryPrefix = "query: "
+		}
+		cfg.KBs[name] = kb
 	}
 
-	// 4. Set Defaults if still empty
-	if cfg.RRFK == 0 {
-		cfg.RRFK = 60
-	}
-	if cfg.LimitVector == 0 {
-		cfg.LimitVector = 20
-	}
-	if cfg.LimitFTS == 0 {
-		cfg.LimitFTS = 20
-	}
-	if cfg.TopK == 0 {
-		cfg.TopK = 5
-	}
 	if cfg.S3Region == "" {
 		cfg.S3Region = "us-east-1"
 	}
